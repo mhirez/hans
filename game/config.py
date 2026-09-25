@@ -25,17 +25,15 @@ CUE_SHORT = {"owner": "von Osten", "scent": "scent", "crowd": "crowd"}
 N_DOORS = 3
 ROMAN = ("I", "II", "III")
 
-# --- Hans's body and patience (his motivation) ---------------------------------------
-HANS_SPEED = 3.5            # tiles per second
-STUDY_TIME = 1.2            # seconds spent studying one cue source up close
-PATIENCE = 14.0             # seconds Hans will spend gathering information
+# --- Hans's body and patience (his motivation); per-Hans values live in temperament.py -
+STUDY_TIME = 1.0            # seconds spent studying one cue source up close
 CROWD_PATIENCE_DRAIN = 1.3  # a watching crowd makes Hans restless
 MIN_OBSERVE_TIME = 1.0      # Hans always takes in the scene before acting
 PASSIVE_SENSE_INTERVAL = 0.4
 DECIDE_TIME = 0.9           # visible "thinking" pause
 TAP_INTERVAL = 0.38
 REVEAL_TIME = 1.8
-START_DELAY = 0.6
+START_DELAY = 0.4
 
 # --- Perception ----------------------------------------------------------------------
 VISUAL_RANGE = 20.0
@@ -60,21 +58,22 @@ CROWD_SAW = 0.75
 CROWD_GUESS = 0.6
 SCENT_PRESENT = 0.85
 SCENT_ABSENT = 0.6
-NEGATIVE_EVIDENCE_SCALE = 0.5   # "no scent here" counts half as much as "carrot here"
+TYPICAL_STRENGTH = 0.85     # what Hans expects a signal to be when imagining a closer look
 
 # --- Learning (Beta trust per cue type) ----------------------------------------------
 PRIOR = 1.0                 # alpha = beta = 1  ->  trust 0.5, maximum uncertainty
 DECAY = 0.97                # per trial, evidence fades back toward the prior
+REFUTED_NEGATIVE = 0.5      # "no scent here" turned out to be the carrot's door: counts half a miss
 
-# --- Attention and decision (utility) ------------------------------------------------
-CURIOSITY = 0.6             # bonus for studying cue types Hans is unsure about
-TRAVEL_COST = 0.04          # utility lost per second of walking
-INVESTIGATE_THRESHOLD = 0.1
-CONFIDENT_MARGIN = 0.45     # Hans stops looking once one door is this far ahead
+# --- Attention (value of information) ------------------------------------------------
+TRAVEL_COST = 0.012         # expected-accuracy points lost per second of walking
+INVESTIGATE_THRESHOLD = 0.03
 MAX_INVESTIGATIONS = 5
 
 # --- Cases ---------------------------------------------------------------------------
-INVESTIGATION_TRIALS = 10
+INVESTIGATION_TRIALS = 10   # later cases get fewer (see case.budget_for)
+MIN_TRIALS = 6
 TRAINING_TRIALS = 60
 TRUTH_MARGIN = 0.1          # a case's answer must lead the runner-up by this much
+HINT_COST = 5               # points per piece of advice from Professor Stumpf
 FAST_FORWARD = 3

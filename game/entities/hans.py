@@ -5,13 +5,14 @@ from dataclasses import dataclass
 import math
 import random
 
-from game.config import HANS_SPEED, PATIENCE, CROWD_PATIENCE_DRAIN, PASSIVE_SENSE_INTERVAL
+from game.config import CROWD_PATIENCE_DRAIN, PASSIVE_SENSE_INTERVAL
 from game.ai.beliefs import BeliefModel
 from game.ai.hans_states import WAITING
 from game.ai.mind import HansMind
-from game.ai.pathfinding import astar, SearchResult
+from game.ai.pathfinding import SearchResult
 from game.ai.perception import Senses
 from game.ai.state_machine import StateMachine
+from game.ai.temperament import Temperament, STEADY
 from game.ai.utility import Decision
 from game.world import World, START, Point, tile_of, center
 
@@ -31,31 +32,35 @@ class Outcome:
         return self.decision.choice == self.carrot
 
 
-def travel_times(world: World, pos: Point, sources) -> dict[str, float]:
+def travel_times(world: World, pos: Point, sources, speed: float) -> dict[str, float | None]:
     """Walking time to each source's study tile, from real A* path costs (None = unreachable)."""
     times = {}
     for s in sources:
-        result = astar(tile_of(pos), s.observe_tile, world.walkable)
-        times[s.id] = None if result.path is None else result.cost / HANS_SPEED
+        result = world.route(tile_of(pos), s.observe_tile)
+        times[s.id] = None if result.path is None else result.cost / speed
     return times
 
 
 class Hans:
-    def __init__(self, world: World, rng: random.Random, beliefs: BeliefModel | None = None):
+    def __init__(self, world: World, rng: random.Random, beliefs: BeliefModel | None = None,
+                 temperament: Temperament = STEADY):
         self.world = world
         self.rng = rng
-        self.mind = HansMind(beliefs, rng)
+        self.temperament = temperament
+        self.mind = HansMind(beliefs, rng, temperament)
         self.pos: Point = START
         self.facing = -1
         self.walk_phase = 0.0
         self.waypoints: list[Point] = []
         self.search: SearchResult | None = None
         self.senses: Senses | None = None
-        self.patience = PATIENCE
+        self.patience = temperament.patience
         self.sense_timer = 0.0
         self.first_look = True
         self.target = None
         self.route_failed = False
+        self.returning = False
+        self.studying = False
         self.study_left = 0.0
         self.tapping = False
         self.taps_done = 0
@@ -63,6 +68,7 @@ class Hans:
         self.outcome: Outcome | None = None
         self.caption = ""
         self.done = False
+        self.events: list[str] = []
         self.fsm = StateMachine(self, WAITING)
 
     @property
@@ -73,6 +79,10 @@ class Hans:
     def state(self) -> str:
         return self.fsm.name
 
+    @property
+    def moving(self) -> bool:
+        return bool(self.waypoints) and self.state in ("WAITING", "INVESTIGATING", "ANSWERING")
+
     # --- commands from the game ------------------------------------------------------
     def begin_trial(self, senses: Senses):
         self.senses = senses
@@ -80,7 +90,8 @@ class Hans:
         self.facing = -1
         self.waypoints = []
         self.search = None
-        self.patience = PATIENCE
+        self.returning = False
+        self.patience = self.temperament.patience
         self.sense_timer = 0.0
         self.first_look = True
         self.outcome = None
@@ -94,6 +105,10 @@ class Hans:
     def update(self, dt: float):
         self.fsm.update(dt)
 
+    def drain_events(self) -> list[str]:
+        events, self.events = self.events, []
+        return events
+
     # --- helpers the states use ------------------------------------------------------
     def drain_patience(self, dt: float):
         self.patience -= dt * (CROWD_PATIENCE_DRAIN if self.senses.crowd_audible else 1.0)
@@ -104,11 +119,11 @@ class Hans:
             self.sense_timer = 0.0
             self.mind.perceive(self.senses, self.pos)
 
-    def travel_times(self) -> dict[str, float]:
-        return travel_times(self.world, self.pos, self.senses.sources())
+    def travel_times(self) -> dict[str, float | None]:
+        return travel_times(self.world, self.pos, self.senses.sources(), self.temperament.speed)
 
     def walk_to(self, tile, final: Point | None = None) -> bool:
-        self.search = astar(tile_of(self.pos), tile, self.world.walkable)
+        self.search = self.world.route(tile_of(self.pos), tile)
         if self.search.path is None:
             self.waypoints = []
             return False
@@ -119,7 +134,7 @@ class Hans:
 
     def step(self, dt: float) -> bool:
         """Follow the current waypoints. Returns True once there are none left."""
-        budget = HANS_SPEED * dt
+        budget = self.temperament.speed * dt
         while self.waypoints and budget > 0:
             tx, ty = self.waypoints[0]
             dx, dy = tx - self.pos[0], ty - self.pos[1]
@@ -133,6 +148,7 @@ class Hans:
             else:
                 self.pos = (self.pos[0] + dx / dist * budget, self.pos[1] + dy / dist * budget)
                 budget = 0
+        if self.waypoints:
             self.walk_phase += dt * 10
         return not self.waypoints
 

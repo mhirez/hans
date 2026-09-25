@@ -11,7 +11,7 @@ from game.config import (N_DOORS, ROMAN, OWNER_SURE, OWNER_GUESS, CROWD_SAW, CRO
                          SCENT_PRESENT, SCENT_ABSENT)
 
 OWNER_MODES = ("knows", "guessing", "misled", "absent")
-SCENT_MODES = ("normal", "masked", "decoy")
+SCENT_MODES = ("normal", "masked", "decoy", "swapped")
 CROWD_MODES = ("absent", "saw", "guessing")
 
 
@@ -31,11 +31,14 @@ class TrialSetup:
     def copy(self) -> "TrialSetup":
         return TrialSetup(**asdict(self))
 
-    def summary(self) -> str:
-        """Short notebook line, e.g. 'VO misled>I far - screen - blinkers - decoy III - crowd saw'."""
+    def summary(self, misled_to: int | None = None, decoy_at: int | None = None) -> str:
+        """Short notebook line, e.g. 'VO misled>I far · screen · blinkers · decoy III · crowd saw'.
+        Pass the resolved doors to show where 'Any' actually landed."""
+        misled_to = self.misled_to if misled_to is None else misled_to
+        decoy_at = self.decoy_at if decoy_at is None else decoy_at
         vo = {"knows": "VO knows", "guessing": "VO guessing", "misled": "VO misled", "absent": "no VO"}[self.owner]
-        if self.owner == "misled" and self.misled_to is not None:
-            vo += f">{ROMAN[self.misled_to]}"
+        if self.owner == "misled" and misled_to is not None:
+            vo += f">{ROMAN[misled_to]}"
         if self.owner != "absent" and self.owner_far:
             vo += " far"
         parts = [vo]
@@ -45,8 +48,9 @@ class TrialSetup:
             parts.append("blinkers")
         if self.scent == "masked":
             parts.append("scent masked")
-        elif self.scent == "decoy":
-            parts.append("decoy" + (f" {ROMAN[self.decoy_at]}" if self.decoy_at is not None else ""))
+        elif self.scent in ("decoy", "swapped"):
+            word = "decoy" if self.scent == "decoy" else "only decoy"
+            parts.append(word + (f" {ROMAN[decoy_at]}" if decoy_at is not None else ""))
         if self.crowd != "absent":
             parts.append(f"crowd {self.crowd}")
         return " · ".join(parts)
@@ -95,7 +99,7 @@ def resolve(setup: TrialSetup, rng: random.Random, number: int = 0) -> Trial:
     elif setup.owner == "guessing":
         owner_door = rng.randrange(N_DOORS)
 
-    decoy = _other_door(rng, carrot, setup.decoy_at) if setup.scent == "decoy" else None
+    decoy = _other_door(rng, carrot, setup.decoy_at) if setup.scent in ("decoy", "swapped") else None
 
     crowd_door = None
     if setup.crowd == "saw":
@@ -108,8 +112,9 @@ def resolve(setup: TrialSetup, rng: random.Random, number: int = 0) -> Trial:
         signals["owner"] = Signal(owner_door, +1, OWNER_GUESS if setup.owner == "guessing" else OWNER_SURE)
     if crowd_door is not None:
         signals["crowd"] = Signal(crowd_door, +1, CROWD_SAW if setup.crowd == "saw" else CROWD_GUESS)
+    smelly = {"normal": {carrot}, "masked": set(), "decoy": {carrot, decoy}, "swapped": {decoy}}[setup.scent]
     for d in range(N_DOORS):
-        smells = setup.scent != "masked" and d in (carrot, decoy)
+        smells = d in smelly
         signals[f"scent_{d}"] = Signal(d, +1, SCENT_PRESENT) if smells else Signal(d, -1, SCENT_ABSENT)
 
     return Trial(number, setup, carrot, owner_door, crowd_door, decoy, signals)

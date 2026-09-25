@@ -4,7 +4,7 @@ import math
 
 import pygame
 
-from game.config import TILE, ARENA_X, ARENA_Y, ARENA_W, ARENA_H, ROMAN, SCENT_RANGE, PATIENCE
+from game.config import TILE, ARENA_X, ARENA_Y, ARENA_W, ARENA_H, ROMAN, SCENT_RANGE
 from game.ui import sprites, theme as T
 from game.ui.theme import dashed_line
 from game.world import Tile, SCREEN_TILES, CROWD_SLOTS, World
@@ -27,6 +27,8 @@ class ArenaView:
 
     def _render_static(self, world: World) -> pygame.Surface:
         s = pygame.Surface((ARENA_W + ARENA_X, ARENA_H + ARENA_Y))
+        if pygame.display.get_surface() is not None:
+            s = s.convert()
         for r in range(world.rows):
             for c in range(world.cols):
                 rect = tile_rect(c, r)
@@ -96,7 +98,7 @@ class ArenaView:
 
     def _draw_hans(self, surface, hans, blinkers):
         state = hans.state
-        moving = bool(hans.waypoints) and state in ("INVESTIGATING", "ANSWERING")
+        moving = hans.moving
         target = hans.target
         head = "down" if (state == "INVESTIGATING" and target is not None and target.cue == "scent"
                           and not hans.waypoints) else "up"
@@ -113,7 +115,7 @@ class ArenaView:
     def _strongest_source(hans):
         best, best_e = None, 0.05
         for sid, r in hans.mind.readings.items():
-            e = abs(r.evidence) * hans.beliefs.weight(r.cue)
+            e = abs(r.evidence) * hans.beliefs.weight(r.cue) * (1 if r.polarity > 0 else 0.5)
             if e > best_e:
                 src = hans.world.source(sid)
                 if src is not None:
@@ -172,15 +174,15 @@ class ArenaView:
                     x, y = px((d.center_x - 0.3 + i * 0.3, 1.1))
                     pygame.draw.arc(surface, T.RED, (x - 3, y - 8, 6, 10), 1.5, 4.7, 1)
 
-        scores = hans.mind.scores()
+        belief = hans.mind.belief()
         for d in hans.world.doors:
-            v = scores[d.index]
+            p = belief[d.index]
             x, y = px((d.center_x, 2.05))
-            width = int(min(1.0, abs(v)) * 48)
-            bar = pygame.Rect(x if v >= 0 else x - width, y, width, 7)
-            pygame.draw.rect(surface, T.GREEN if v >= 0 else T.RED, bar)
-            pygame.draw.line(surface, T.INK, (x, y - 2), (x, y + 9), 1)
-            self.theme.text(surface, f"{v:+.2f}", small, T.INK, (x, y + 9), "midtop")
+            back = pygame.Rect(x - 30, y, 60, 7)
+            pygame.draw.rect(surface, T.PAPER_DARK, back)
+            pygame.draw.rect(surface, T.GREEN, (back.x, back.y, int(back.width * p), back.height))
+            pygame.draw.rect(surface, T.INK_SOFT, back, 1)
+            self.theme.text(surface, f"{p:.0%}", small, T.INK, (x, y + 9), "midtop")
 
         for sid, r in hans.mind.readings.items():
             src = world.source(sid)
@@ -201,7 +203,7 @@ class ArenaView:
         pygame.draw.rect(surface, T.INK, box, border_radius=3)
         surface.blit(label, label.get_rect(center=box.center))
         if hans.state in ("OBSERVING", "INVESTIGATING"):
-            frac = max(0.0, hans.patience / PATIENCE)
+            frac = max(0.0, hans.patience / hans.temperament.patience)
             ring = pygame.Rect(0, 0, 16, 16)
             ring.midleft = (box.right + 4, box.centery)
             pygame.draw.arc(surface, T.RED, ring, math.pi / 2, math.pi / 2 + frac * 2 * math.pi, 3)

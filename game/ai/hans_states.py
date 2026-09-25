@@ -2,19 +2,24 @@
 
     state          leaves when                                        goes to
     WAITING        the scientist runs a trial ("start")               OBSERVING
-    OBSERVING      one door is clearly ahead / patience gone          DECIDING
-                   a source is worth a closer look                    INVESTIGATING
+                   (between trials he trots back to his spot)
+    OBSERVING      he is sure enough of one door / patience gone      DECIDING
+                   a source is worth a closer look (VOI > cost)       INVESTIGATING
                    nothing is worth the walk                          DECIDING
     INVESTIGATING  studied the source (walk with A*, then study)      OBSERVING
                    patience gone                                      DECIDING
     DECIDING       thinking pause over                                ANSWERING
     ANSWERING      walked to the door and tapped its number           LEARNING
     LEARNING       carrot revealed, trust updated                     WAITING
+
+States append simple event names to `hans.events` ("tap", "sniff", "correct", ...);
+the game turns them into sounds. The AI itself never touches pygame.
 """
 
 from game.config import (START_DELAY, MIN_OBSERVE_TIME, DECIDE_TIME, TAP_INTERVAL, REVEAL_TIME,
                          STUDY_TIME, ROMAN)
 from game.ai.state_machine import State
+from game.world import START, tile_of, distance
 
 STUDY_VERBS = {"owner": "studies", "scent": "sniffs at", "crowd": "listens to"}
 COUNT_WORDS = ("one", "two", "three")
@@ -22,6 +27,14 @@ COUNT_WORDS = ("one", "two", "three")
 
 class Waiting(State):
     name = "WAITING"
+
+    def enter(self, hans):
+        hans.returning = distance(hans.pos, START) > 0.1 and hans.walk_to(tile_of(START), final=START)
+
+    def update(self, hans, dt):
+        if hans.returning and hans.step(dt):
+            hans.returning = False
+            hans.facing = -1
 
     def on_event(self, hans, event) -> bool:
         if event == "start":
@@ -62,6 +75,7 @@ class Investigating(State):
 
     def enter(self, hans):
         hans.study_left = STUDY_TIME
+        hans.studying = False
         hans.route_failed = not hans.walk_to(hans.target.observe_tile)
         hans.caption = f"Hans walks over to {hans.target.label}."
 
@@ -69,7 +83,7 @@ class Investigating(State):
         hans.drain_patience(dt)
         hans.sense(dt)
         if hans.route_failed:
-            hans.mind.studied.add(hans.target.id)
+            hans.mind.studied.append(hans.target.id)
             hans.fsm.change(OBSERVING)
             return
         if hans.patience <= 0:
@@ -78,6 +92,9 @@ class Investigating(State):
             return
         if not hans.step(dt):
             return
+        if not hans.studying:
+            hans.studying = True
+            hans.events.append("sniff" if hans.target.cue == "scent" else "study")
         hans.face(hans.target.pos)
         hans.caption = f"Hans {STUDY_VERBS[hans.target.cue]} {hans.target.label}."
         hans.study_left -= dt
@@ -87,6 +104,7 @@ class Investigating(State):
 
     def exit(self, hans):
         hans.target = None
+        hans.studying = False
 
 
 class Deciding(State):
@@ -123,6 +141,7 @@ class Answering(State):
             hans.tap_timer = 0.0
             if hans.taps_done < choice + 1:
                 hans.taps_done += 1
+                hans.events.append("tap")
                 hans.caption = "Hans taps: " + ", ".join(COUNT_WORDS[:hans.taps_done]) + "..."
             else:
                 hans.fsm.change(LEARNING)
@@ -137,6 +156,7 @@ class Learning(State):
     def enter(self, hans):
         hans.finish_trial(hans.senses.reveal())
         o = hans.outcome
+        hans.events.extend(["open", "correct" if o.success else "wrong"])
         hans.caption = (f"Correct! The carrot was behind door {ROMAN[o.carrot]}." if o.success else
                         f"Wrong. The carrot was behind door {ROMAN[o.carrot]}.")
 

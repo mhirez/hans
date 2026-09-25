@@ -1,19 +1,21 @@
 """Cases: each one is a Hans with a hidden training history, and the scientist has to
 find out what he learned from it.
 
-A Hans is *not* hand-authored. We pick a training regime (who trained him, and how) and
-run TRAINING_TRIALS instant rehearsals through the same HansMind the player watches. The
-case's answer is whichever cue he ended up trusting most: emergent, not scripted.
+A Hans is *not* hand-authored. We pick a training regime (who trained him, and how) and a
+temperament, then run TRAINING_TRIALS instant rehearsals through the same HansMind the
+player watches. The case's answer is whichever cue he ended up trusting most: emergent,
+not scripted.
 """
 
 from dataclasses import dataclass
 import random
 
-from game.config import (TRAINING_TRIALS, TRUTH_MARGIN, INVESTIGATION_TRIALS, PATIENCE, STUDY_TIME,
-                         CROWD_PATIENCE_DRAIN, START_DELAY, MIN_OBSERVE_TIME)
+from game.config import (TRAINING_TRIALS, TRUTH_MARGIN, INVESTIGATION_TRIALS, MIN_TRIALS, STUDY_TIME,
+                         CROWD_PATIENCE_DRAIN, START_DELAY, MIN_OBSERVE_TIME, HINT_COST)
 from game.ai.beliefs import BeliefModel
 from game.ai.mind import HansMind
 from game.ai.perception import Senses
+from game.ai.temperament import Temperament, TEMPERAMENTS, STEADY
 from game.entities.hans import travel_times
 from game.trial import Trial, TrialSetup, resolve
 from game.world import World, START, center
@@ -48,7 +50,8 @@ REGIMES = {
         scent={"normal": 0.45, "masked": 0.3, "decoy": 0.25}, crowd={"absent": 0.4, "saw": 0.3, "guessing": 0.3}),
 }
 
-PLACES = ["Hamburg", "Elberfeld", "Vienna", "Munich", "Leipzig", "Dresden", "Breslau", "Cologne"]
+PLACES = ["Hamburg", "Elberfeld", "Vienna", "Munich", "Leipzig", "Dresden", "Breslau", "Cologne",
+          "Königsberg", "Prague", "Zurich", "Stuttgart"]
 
 CASE_ONE_INTRO = [
     "Berlin, 1904.",
@@ -59,7 +62,7 @@ CASE_ONE_INTRO = [
 LATER_INTRO = [
     "{place}, {year}.",
     "Another wonder-horse, named Hans after the famous one.",
-    "Another owner who swears it's genuine.",
+    "His groom says he is {temperament}.",
     "Find out what this Hans really reads.",
 ]
 
@@ -84,12 +87,13 @@ def rehearse(mind: HansMind, world: World, trial: Trial, rng: random.Random) -> 
     the real-time FSM, with walking replaced by its A* travel time."""
     configure_world(world, trial)
     senses = Senses(world, trial, rng)
+    t = mind.temperament
     drain = CROWD_PATIENCE_DRAIN if world.crowd_present else 1.0
-    pos, patience = START, PATIENCE - (START_DELAY + MIN_OBSERVE_TIME) * drain
+    pos, patience = START, t.patience - (START_DELAY + MIN_OBSERVE_TIME) * drain
     mind.start_trial()
     mind.perceive(senses, pos)
-    while not mind.confident():
-        option = mind.plan_attention(senses, travel_times(world, pos, senses.sources()), patience)
+    while patience > 0 and not mind.confident():
+        option = mind.plan_attention(senses, travel_times(world, pos, senses.sources(), t.speed), patience)
         if option is None:
             break
         source = world.source(option.source_id)
@@ -102,12 +106,18 @@ def rehearse(mind: HansMind, world: World, trial: Trial, rng: random.Random) -> 
     return decision.choice == trial.carrot
 
 
-def train_hans(regime: Regime, seed: int, trials: int = TRAINING_TRIALS) -> BeliefModel:
+def train_hans(regime: Regime, seed: int, temperament: Temperament = STEADY,
+               trials: int = TRAINING_TRIALS) -> BeliefModel:
     rng = random.Random(seed)
-    world, mind = World(), HansMind(BeliefModel(), rng)
+    world, mind = World(), HansMind(BeliefModel(), rng, temperament)
     for i in range(trials):
         rehearse(mind, world, resolve(training_setup(regime, rng), rng, i), rng)
     return mind.beliefs
+
+
+def budget_for(number: int) -> int:
+    """Later cases give the scientist fewer trials: 10, 10, 9, 9, 8, 8, 7, 7, 6..."""
+    return max(MIN_TRIALS, INVESTIGATION_TRIALS - (number - 1) // 2)
 
 
 @dataclass
@@ -116,6 +126,7 @@ class Case:
     title: str
     intro: list[str]
     regime: Regime
+    temperament: Temperament
     seed: int
     arrival: BeliefModel         # Hans's beliefs the day Pfungst arrives (kept untouched)
     truth: str
@@ -128,17 +139,19 @@ class Case:
 
 def make_case(number: int, rng: random.Random) -> Case:
     if number == 1:
-        regime, seeds, want = REGIMES["lessons"], range(1904, 1904 + 200), "owner"
+        regime, temperament, want = REGIMES["lessons"], STEADY, "owner"
+        seeds = range(1904, 1904 + 200)
         title, intro = "Case 1: Berlin, 1904", CASE_ONE_INTRO
     else:
-        regime, seeds, want = rng.choice(list(REGIMES.values())), [rng.randrange(10**9) for _ in range(40)], None
-        place, year = rng.choice(PLACES), 1904 + number
+        regime, temperament, want = rng.choice(list(REGIMES.values())), rng.choice(list(TEMPERAMENTS.values())), None
+        seeds = [rng.randrange(10**9) for _ in range(40)]
+        place, year = rng.choice(PLACES), rng.randint(1905, 1913)
         title = f"Case {number}: {place}, {year}"
-        intro = [line.format(place=place, year=year) for line in LATER_INTRO]
+        intro = [line.format(place=place, year=year, temperament=temperament.description) for line in LATER_INTRO]
 
     best = None
     for seed in seeds:
-        beliefs = train_hans(regime, seed)
+        beliefs = train_hans(regime, seed, temperament)
         cue, lead = beliefs.dominant()
         if want is not None and cue != want:
             continue
@@ -147,7 +160,7 @@ def make_case(number: int, rng: random.Random) -> Case:
         if lead >= TRUTH_MARGIN:
             break
     seed, beliefs, cue, lead = best
-    return Case(number, title, intro, regime, seed, beliefs, cue, lead)
+    return Case(number, title, intro, regime, temperament, seed, beliefs, cue, lead, budget_for(number))
 
 
 @dataclass(frozen=True)
@@ -158,6 +171,8 @@ class CaseResult:
     actual: int
     trials_left: int
     xray_used: bool
+    hints_used: int = 0
+    autopilot: bool = False
 
     @property
     def verdict_correct(self) -> bool:
@@ -169,7 +184,8 @@ class CaseResult:
 
     @property
     def score(self) -> int:
-        return 50 * self.verdict_correct + 30 * self.prediction_correct + 5 * self.trials_left
+        raw = 50 * self.verdict_correct + 30 * self.prediction_correct + 5 * self.trials_left
+        return max(0, raw - HINT_COST * self.hints_used)
 
     @property
     def rank(self) -> str:

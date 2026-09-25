@@ -7,19 +7,22 @@ by exactly the AI you watch.
 
 import random
 
-from game.config import INVESTIGATE_THRESHOLD, MAX_INVESTIGATIONS, CONFIDENT_MARGIN
+from game.config import INVESTIGATE_THRESHOLD, MAX_INVESTIGATIONS
 from game.ai.beliefs import BeliefModel
 from game.ai.perception import CueObservation, Senses
-from game.ai.utility import AttentionOption, Decision, score_doors, margin, decide, rank_attention
+from game.ai.temperament import Temperament, STEADY
+from game.ai.utility import AttentionOption, Decision, door_belief, decide, rank_attention
 
 
 class HansMind:
-    def __init__(self, beliefs: BeliefModel | None = None, rng: random.Random | None = None):
+    def __init__(self, beliefs: BeliefModel | None = None, rng: random.Random | None = None,
+                 temperament: Temperament = STEADY):
         self.beliefs = beliefs or BeliefModel()
         self.rng = rng or random.Random()
+        self.temperament = temperament
         self.readings: dict[str, CueObservation] = {}
-        self.studied: set[str] = set()
-        self.looked_at: list[str] = []          # what the scientist can see Hans doing
+        self.studied: list[str] = []            # source ids, in the order Hans studied them
+        self.looked_at: list[str] = []          # the same, as labels the scientist can see
         self.options: list[AttentionOption] = []
         self.decision: Decision | None = None
         self.last_deltas: dict[str, float] = {}
@@ -31,6 +34,10 @@ class HansMind:
         self.options = []
         self.decision = None
         self.last_deltas = {}
+
+    @property
+    def studied_cues(self) -> list[str]:
+        return list(dict.fromkeys(sid.split("_")[0] for sid in self.studied))
 
     # --- perception ------------------------------------------------------------------
     def perceive(self, senses: Senses, pos):
@@ -45,29 +52,29 @@ class HansMind:
 
     def study(self, senses: Senses, source, pos):
         """A focused look: always replaces what Hans thought before."""
-        self.studied.add(source.id)
+        self.studied.append(source.id)
         self.looked_at.append(source.label)
         obs = senses.observe(source, pos, focused=True)
         if obs is not None:
             self.readings[source.id] = obs
 
     # --- reasoning -------------------------------------------------------------------
-    def scores(self) -> list[float]:
-        return score_doors(self.readings.values(), self.beliefs)
+    def belief(self) -> list[float]:
+        return door_belief(self.readings.values(), self.beliefs)
 
     def confident(self) -> bool:
-        return margin(self.scores()) >= CONFIDENT_MARGIN
+        return max(self.belief()) >= self.temperament.confident_p
 
     def plan_attention(self, senses: Senses, travel_times: dict, patience_left: float) -> AttentionOption | None:
-        self.options = rank_attention(senses.sources(), self.readings, self.beliefs, travel_times,
-                                      patience_left, self.studied, senses.wearing_blinkers)
+        self.options = rank_attention(senses.sources(), self.readings, self.beliefs, travel_times, patience_left,
+                                      set(self.studied), senses.wearing_blinkers, self.temperament.curiosity)
         if not self.options or len(self.studied) >= MAX_INVESTIGATIONS:
             return None
         best = self.options[0]
         return best if best.utility > INVESTIGATE_THRESHOLD else None
 
     def decide(self) -> Decision:
-        self.decision = decide(self.scores(), self.rng)
+        self.decision = decide(self.belief(), self.rng, self.temperament.confident_p)
         return self.decision
 
     def learn(self, correct_door: int) -> dict[str, float]:

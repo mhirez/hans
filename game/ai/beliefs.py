@@ -5,14 +5,16 @@
 
 After every trial each positive claim Hans perceived ("the carrot is behind II") is checked
 against the revealed door; alpha grows when it was right, beta when it was wrong, scaled by how
-clearly Hans perceived it. Evidence decays a little every trial so Hans can re-learn when the
-world changes, which is exactly what the scientist's experiments do to him.
+clearly Hans perceived it. A "no scent here" reading is usually right by chance, so it only
+counts when it is refuted (the carrot *was* there): half a miss. Evidence decays a little every
+trial so Hans can re-learn when the world changes, which is exactly what the scientist's
+experiments do to him.
 """
 
 from dataclasses import dataclass
 import math
 
-from game.config import CUES, N_DOORS, PRIOR, DECAY
+from game.config import CUES, N_DOORS, PRIOR, DECAY, REFUTED_NEGATIVE
 
 
 @dataclass
@@ -66,6 +68,8 @@ class BeliefModel:
         for obs in observations:
             if obs.polarity > 0:
                 self.cues[obs.cue].update(obs.door == correct_door, obs.clarity)
+            elif obs.door == correct_door:
+                self.cues[obs.cue].update(False, obs.clarity * REFUTED_NEGATIVE)
         return {c: self.trust(c) - before[c] for c in self.cues}
 
     def ranking(self) -> list[tuple[str, float]]:

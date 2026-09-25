@@ -4,15 +4,16 @@
 
 Everyone believes Clever Hans the horse can think. You are **Oskar Pfungst**, the young
 psychologist sent to find out how he really does it. Design experiments, watch what Hans
-looks at, name what he actually relies on, and prove it to the Commission, before your own
-experiments teach him something new.
+looks at, name what he really relies on, then prove it: make him tap the wrong door in front
+of the Commission, and predict which one. Just don't forget that every experiment teaches Hans
+something too.
 
-![Hans with the AI X-Ray on](docs/images/xray.png)
+![Hans with the AI X-Ray on: blinkered, he has walked round the screen to study von Osten](docs/images/xray.png)
 
-Hans is a fully autonomous game-AI agent: a **finite state machine** with **perception**
-(sight, smell, sound, line of sight, noise), **utility-based decisions** about what to study and
-which door to tap, **A\* pathfinding**, **online trust learning**, and **procedurally generated**
-training histories. Python + pygame-ce, AI for Games coursework.
+Two AIs, both written from scratch in Python + pygame-ce for an AI for Games module:
+
+- **Hans**, an autonomous agent: a **finite state machine**; **perception** by sight, smell and sound with line of sight and misreads; **Bayesian cue integration**; **value-of-information** decisions about what to study; **A\* pathfinding**; **online trust learning**; a **temperament**; and a **procedurally generated** training history.
+- **Professor Stumpf**, a rule-based scientist: tracks hypotheses from the notebook alone and designs the most informative experiment out of 84. He gives hints, or solves the case himself. Over 200 generated cases: **96%** right verdicts, **94%** right Commission predictions, **3.4** trials on average.
 
 ## Run it
 
@@ -23,44 +24,53 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Options: `--xray` (start with the AI X-Ray on), `--seed 42` (reproducible run),
-`--case 2` (jump to a generated case), `--no-log` (don't write `logs/`).
+Options: `--xray` (start with the X-Ray on), `--seed 42` (reproducible run), `--case 3` (start
+from a later case), `--no-sound`, `--no-log`.
 
 ## How to play
 
-1. **Set up an experiment** in the panel: where the carrot is, whether von Osten knows the answer (or is misled, or absent), how far away he stands, screen, blinkers, scent (normal / masked / decoy) and the crowd.
-2. **Run the trial** (Enter). Hans observes, walks over to study whatever he trusts, decides, and taps the door's number with his hoof.
-3. **Read the notebook**: what he looked at, what he tapped, right or wrong. Every trial also teaches Hans something.
-4. **Verdict** (V): von Osten's posture, scent, or the crowd?
-5. **The Commission's test**: set up one last trial and predict the door he'll tap.
+1. **Set up an experiment** in the panel (click or keys 1–9; hover to see what an option does).
+2. **Run the trial** (Enter). Hans takes in the courtyard, walks over to study whatever could change his mind, and taps the door he believes in.
+3. **Read the evidence.** The notebook records what he studied and tapped; the EVIDENCE tab sums it up per cue.
+4. **Verdict** (V): von Osten's posture, the scent, or the crowd?
+5. **The Commission's test**: hide the carrot behind a chosen door and predict Hans's *mistake*.
+
+Stuck? **H** asks Professor Stumpf (−5 points), **A** applies his suggestion, **S** lets him run the case.
 
 | Input | Action |
 |---|---|
-| Click setup box / `1`–`9`, `0` | Cycle option (right-click or Shift = back) |
+| Click / `1`–`9`, `0` | Cycle a setup option (right-click or Shift = back) |
 | `Enter` / `Space` | Run trial · continue |
 | `V` | Verdict |
-| `X` | AI X-Ray (shows what Hans can't know) |
-| `F` | Fast-forward ×3 |
-| `Esc` | Back / quit |
+| `Tab` | Notebook / Evidence / Stumpf |
+| `H` / `A` / `S` | Ask Stumpf / apply his setup / autopilot |
+| `X` | AI X-Ray (shows Hans's mind; makes the case unofficial) |
+| `F` / `P` / `M` | Fast-forward / pause / mute |
+| `F1` / `F11` / `Esc` | Help / full screen / title |
 
 ## The AI
 
 | Technique | Where | What it does |
 |---|---|---|
-| Finite state machine | [`game/ai/hans_states.py`](game/ai/hans_states.py), [`state_machine.py`](game/ai/state_machine.py) | WAITING → OBSERVING ⇄ INVESTIGATING → DECIDING → ANSWERING → LEARNING |
-| Perception | [`game/ai/perception.py`](game/ai/perception.py) | Clarity by sense, distance, line of sight, blinkers; misreads. Hans never sees the answer |
-| Decision making | [`game/ai/utility.py`](game/ai/utility.py) | Door score = evidence × trust; attention = value of a closer look + curiosity − walking cost |
-| Learning | [`game/ai/beliefs.py`](game/ai/beliefs.py) | Beta(α, β) trust per cue with decay, which is why your experiments change him |
-| Pathfinding | [`game/ai/pathfinding.py`](game/ai/pathfinding.py) | 8-way A*, octile heuristic; travel time feeds the attention decision |
-| Procedural generation | [`game/case.py`](game/case.py) | Each Hans is trained by simulated history; his dominant cue *emerges* |
+| Finite state machines | [`hans_states.py`](game/ai/hans_states.py), [`state_machine.py`](game/ai/state_machine.py) | Hans: WAITING → OBSERVING ⇄ INVESTIGATING → DECIDING → ANSWERING → LEARNING. The same class runs Stumpf's autopilot and the screens |
+| Perception | [`perception.py`](game/ai/perception.py) | Clarity by sense, distance, line of sight, blinkers; misreads. Hans never sees the answer |
+| Decision making | [`utility.py`](game/ai/utility.py) | P(carrot behind each door) by Bayes' rule; study the source with the best value of information minus walking cost |
+| Learning | [`beliefs.py`](game/ai/beliefs.py) | Beta(α, β) trust per cue with decay, which is why your experiments change him |
+| Pathfinding | [`pathfinding.py`](game/ai/pathfinding.py) | 8-way A*, octile heuristic; travel time feeds the attention decision |
+| Motivation | [`temperament.py`](game/ai/temperament.py) | Patience, speed, curiosity, confidence: steady, restless, thorough, bold |
+| Procedural generation | [`case.py`](game/case.py) | Each Hans is trained by 60 simulated trials; what he relies on *emerges* |
+| Scientist AI | [`scientist.py`](game/ai/scientist.py) | Rule-based hypothesis tracking + expected-information-gain experiment design + autopilot FSM |
 
-Full design, maths, roadmap, demo script and report plan: **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**.
+Full design, maths, evaluation, video script and report plan: **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**.
 
-## Tests
+## Tests and numbers
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest
+python -m pytest                        # 56 tests
+python -m tools.evaluate stumpf 200     # Stumpf's autopilot on 200 generated cases
+python -m tools.evaluate regimes        # what each training regime x temperament produces
+python -m tools.evaluate logs           # your own play, accuracy by condition
 ```
 
 ## Screens
@@ -68,13 +78,9 @@ python -m pytest
 | | |
 |---|---|
 | ![Title](docs/images/title.png) | ![Case intro](docs/images/intro.png) |
-| ![Notebook](docs/images/notebook.png) | ![Case report](docs/images/result.png) |
+| ![Professor Stumpf's advice](docs/images/stumpf.png) | ![Evidence tab](docs/images/evidence.png) |
+| ![The Commission assembles](docs/images/commission.png) | ![Case report with the trust chart](docs/images/result.png) |
 
-## Status
-
-Playable core done: the Hans AI, cases, verdict and Commission test, X-Ray, and experiment logs.
-Next up: Professor Stumpf's hints and an AI-scientist autopilot (see the roadmap).
-
-*Historical note:* Clever Hans, his owner Wilhelm von Osten, the 1904 Commission and Oskar
-Pfungst's experiments are real. The carrot-behind-doors task, scent and crowd cues and later
-cases are inventions for the game.
+*Historical note:* Clever Hans, Wilhelm von Osten, the 1904 Commission, Carl Stumpf and Oskar
+Pfungst's experiments are real. The carrot-behind-doors task, the scent and crowd cues and the
+later cases are inventions for the game.

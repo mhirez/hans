@@ -55,6 +55,9 @@ class Theme:
         rng = random.Random(seed)
         self.grain = [self._make_grain(rng) for _ in range(4)]
         self.vignette = self._make_vignette()
+        if pygame.display.get_surface() is not None:     # faster blits once a window exists
+            self.grain = [g.convert_alpha() for g in self.grain]
+            self.vignette = self.vignette.convert_alpha()
         self.frame = 0
 
     # --- fonts ---------------------------------------------------------------------------

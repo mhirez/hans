@@ -12,3 +12,6 @@ logs/
 .vscode/
 .idea/
 .DS_Store
+
+# Your casebook (progress between sessions)
+saves/

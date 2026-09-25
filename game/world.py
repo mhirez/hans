@@ -9,6 +9,7 @@ from enum import IntEnum
 import math
 
 from game.config import COLS, ROWS, N_DOORS, ROMAN
+from game.ai.pathfinding import astar, SearchResult
 
 Point = tuple[float, float]
 TileXY = tuple[int, int]
@@ -75,6 +76,7 @@ class Source:
     pos: Point
     observe_tile: TileXY
     label: str
+    door: int | None = None   # scent sources belong to one door
 
 
 class World:
@@ -100,6 +102,7 @@ class World:
         self.screen_up = False
         self.crowd_present = False
         self.grid = [row[:] for row in self.base]
+        self._routes: dict[tuple, SearchResult] = {}
 
     # --- configuration per trial --------------------------------------------------
     def configure(self, owner_present: bool, owner_far: bool, screen: bool, crowd_present: bool):
@@ -149,10 +152,17 @@ class World:
         if self.owner_present:
             out.append(Source("owner", "owner", self.owner_pos, self.owner_observe_tile, "von Osten"))
         for d in self.doors:
-            out.append(Source(f"scent_{d.index}", "scent", d.front, d.front_tile, f"door {d.name}"))
+            out.append(Source(f"scent_{d.index}", "scent", d.front, d.front_tile, f"door {d.name}", d.index))
         if self.crowd_present:
             out.append(Source("crowd", "crowd", CROWD_POS, CROWD_LISTEN_TILE, "the crowd"))
         return out
 
     def source(self, source_id: str) -> Source | None:
         return next((s for s in self.sources() if s.id == source_id), None)
+
+    def route(self, start: TileXY, goal: TileXY) -> SearchResult:
+        """A* between two tiles, cached per layout (the courtyard only changes between trials)."""
+        key = (start, goal, self.screen_up, self.owner_present, self.owner_spot)
+        if key not in self._routes:
+            self._routes[key] = astar(start, goal, self.walkable)
+        return self._routes[key]
