@@ -1,36 +1,49 @@
-"""Full-screen and overlay cards: title, intertitles, help, verdict, the Commission, the case report."""
+"""Full-screen and overlay cards: title, night intertitles, help, pause, well done, caught, finale."""
+
+import math
 
 import pygame
 
-from game.config import WIDTH, HEIGHT, CUES, CUE_LABELS, ROMAN, HINT_COST
+from game.config import WIDTH, HEIGHT
 from game.ui import sprites, theme as T
 
-VERDICT_HINTS = {"owner": "he reads his questioner's body",
-                 "scent": "he smells where the carrot is",
-                 "crowd": "he listens to the audience"}
-CUE_COLOURS = {"owner": T.INK, "scent": T.GREEN, "crowd": T.BLUE}
-
-HELP_LINES = [
-    ("The case", "Everyone thinks Hans can think. Something tells him where the carrot is: von Osten's "
-                 "posture, the scent, or the crowd's murmur. Your job is to find out which."),
-    ("Experiments", "Set the conditions on the right (keys 1-9 or click) and run a trial (Enter). Hans "
-                    "decides for himself what to look at, then taps the door he believes in."),
-    ("Evidence", "The notebook records what he studied and what he tapped. The EVIDENCE tab sums it up. "
-                 "A cue he relies on is followed even when it lies, and missed when it's gone."),
-    ("He learns", "Every trial also teaches Hans. Fool him with the same cue too often and he stops "
-                  "trusting it, and your notebook describes a different horse."),
-    ("Verdict", "Press V to name the cue. Then convince the Commission: hide the carrot behind a chosen "
-                "door, and predict the wrong door Hans will tap."),
-    ("Help", f"H asks Professor Stumpf for advice (-{HINT_COST} points). S lets him run the case. "
-             "X shows Hans's mind (the AI X-Ray) but makes the result unofficial."),
+HELP = [
+    ("Walk", "ARROW KEYS (or WASD). Hold SHIFT to trot: fast, but loud."),
+    ("The trick", "Stand in von Osten's circle until he nods at a door."),
+    ("Tap", "Walk up to that door and press SPACE."),
+    ("Scientists", "They see only what their lantern lights.  ?  means suspicious,  !  means chasing."),
+    ("Hide", "Stay in the dark and behind hay. Trotting and gravel make noise they can hear."),
 ]
-KEYS = "Enter run   V verdict   Tab tabs   H advice   A apply   S autopilot   X x-ray   F fast   P pause   M mute   F11 full screen"
+KEYS = "R restart     Esc pause     X AI X-Ray     M mute     F11 full screen"
+CAUGHT_TIPS = [
+    "Scientists only see inside their lantern light. Wait in the dark until they turn away.",
+    "When you see !, trot away with SHIFT and hide behind hay.",
+    "Trotting is loud. Walk when a scientist is close.",
+    "A ? is a warning: get out of the light before it fills up.",
+]
+
+
+def star(surface, center, size, filled, empty=T.PAPER_DARK):
+    x, y = center
+    pts = []
+    for i in range(10):
+        r = size if i % 2 == 0 else size * 0.45
+        a = -math.pi / 2 + i * math.pi / 5
+        pts.append((x + math.cos(a) * r, y + math.sin(a) * r))
+    pygame.draw.polygon(surface, (236, 190, 70) if filled else empty, pts)
+    pygame.draw.polygon(surface, T.INK if empty == T.PAPER_DARK else T.INK_FAINT, pts, 2)
+
+
+def stars(surface, center, count, size=16, total=3, empty=T.PAPER_DARK):
+    x, y = center
+    gap = size * 2.4
+    for i in range(total):
+        star(surface, (x + (i - (total - 1) / 2) * gap, y), size, i < count, empty)
 
 
 class Cards:
     def __init__(self, theme: T.Theme):
         self.theme = theme
-        self.verdict_rects = {cue: pygame.Rect(WIDTH // 2 - 280, 250 + i * 70, 560, 56) for i, cue in enumerate(CUES)}
         self.blink = 0
 
     def _film_card(self, surface):
@@ -40,55 +53,50 @@ class Cards:
     def _prompt(self, surface, text, y):
         self.blink += 1
         if (self.blink // 35) % 2 == 0:
-            self.theme.text(surface, text, self.theme.serif(20, italic=True), T.FILM_TEXT, (WIDTH // 2, y), "center")
+            self.theme.text(surface, text, self.theme.serif(22, italic=True), T.FILM_TEXT, (WIDTH // 2, y), "center")
 
     # --- title -----------------------------------------------------------------------
-    def title(self, surface, casebook):
+    def title(self, surface, levels, selected, progress):
         th = self.theme
         self._film_card(surface)
         horse = pygame.Surface((64, 56), pygame.SRCALPHA)
         sprites.hans(horse, (32, 52), facing=1, head="up", tap_up=(self.blink // 20) % 2 == 0)
         horse.fill((*T.FILM_TEXT, 0), special_flags=pygame.BLEND_RGB_MAX)
-        surface.blit(pygame.transform.scale(horse, (176, 154)), (WIDTH // 2 - 88, 70))
-        th.spaced(surface, "HANS", th.display(104, bold=True), T.FILM_TEXT, (WIDTH // 2, 232), 18, "midtop")
-        th.text(surface, "a game about learning the wrong clues", th.serif(25, italic=True), T.FILM_TEXT,
-                (WIDTH // 2, 366), "center")
-        th.rule(surface, WIDTH // 2 - 160, WIDTH // 2 + 160, 394, T.FILM_TEXT)
-        th.text(surface, "Berlin, 1904", th.display(22), T.FILM_TEXT, (WIDTH // 2, 420), "center")
-        cont = casebook.next_case
-        self._prompt(surface, "Press Enter to begin" if cont == 1 else f"Press Enter to continue with Case {cont}", 478)
-        menu = ["A   watch Professor Stumpf investigate a case",
-                "H   how to play"]
-        if cont > 1:
-            menu.insert(0, "N   start again from Case 1")
-        y = 522
-        for line in menu:
-            th.text(surface, line, th.type(15), T.FILM_TEXT, (WIDTH // 2, y), "center")
-            y += 24
-        if casebook.cases:
-            th.text(surface, f"Casebook: {len(casebook.cases)} case{'s' if len(casebook.cases) != 1 else ''} closed, "
-                             f"{casebook.solved} solved, {casebook.total_score} points",
-                    th.serif(16, italic=True), T.INK_FAINT, (WIDTH // 2, 640), "center")
-        th.film_overlay(surface)
+        surface.blit(pygame.transform.scale(horse, (160, 140)), (WIDTH // 2 - 80, 64))
+        th.spaced(surface, "HANS", th.display(96, bold=True), T.FILM_TEXT, (WIDTH // 2, 206), 18, "midtop")
+        th.text(surface, "a sneaky game about a clever horse", th.serif(25, italic=True), T.FILM_TEXT,
+                (WIDTH // 2, 332), "center")
+        th.rule(surface, WIDTH // 2 - 160, WIDTH // 2 + 160, 360, T.FILM_TEXT)
 
-    def loading(self, surface, text):
-        th = self.theme
-        self._film_card(surface)
-        th.text(surface, text, th.serif(30, italic=True), T.FILM_TEXT, (WIDTH // 2, HEIGHT // 2), "center")
+        spec = levels[selected]
+        box = pygame.Rect(WIDTH // 2 - 300, 392, 600, 104)
+        pygame.draw.rect(surface, (44, 34, 26), box, border_radius=8)
+        pygame.draw.rect(surface, T.FILM_TEXT, box, 2, border_radius=8)
+        th.text(surface, f"Night {selected}", th.serif(18, italic=True), T.INK_FAINT, (box.centerx, box.y + 12), "midtop")
+        th.text(surface, spec.name, th.display(32, bold=True), T.FILM_TEXT, (box.centerx, box.y + 34), "midtop")
+        stars(surface, (box.centerx, box.y + 84), progress.stars.get(selected, 0), 11, empty=(60, 50, 40))
+        if selected > 0:
+            th.text(surface, "<", th.display(40, bold=True), T.FILM_TEXT, (box.x + 30, box.centery), "center")
+        if selected < progress.unlocked:
+            th.text(surface, ">", th.display(40, bold=True), T.FILM_TEXT, (box.right - 30, box.centery), "center")
+        self._prompt(surface, "Press Enter to play", 540)
+        th.text(surface, "LEFT / RIGHT  choose a night     D  watch the AI play it     H  how to play     Esc  quit",
+                th.type(15), T.FILM_TEXT, (WIDTH // 2, 598), "center")
+        total = sum(progress.stars.values())
+        th.text(surface, f"{total} of {3 * len(levels)} stars", th.serif(16, italic=True), T.INK_FAINT,
+                (WIDTH // 2, 640), "center")
         th.film_overlay(surface)
 
     # --- intertitle ------------------------------------------------------------------
     def intertitle(self, surface, heading, lines, footer="Press Enter"):
         th = self.theme
         self._film_card(surface)
-        th.spaced(surface, heading.upper(), th.display(22, bold=True), T.FILM_TEXT, (WIDTH // 2, 120), 4, "midtop")
-        th.rule(surface, WIDTH // 2 - 200, WIDTH // 2 + 200, 160, T.FILM_TEXT)
-        y = 220
+        th.spaced(surface, heading.upper(), th.display(24, bold=True), T.FILM_TEXT, (WIDTH // 2, 130), 4, "midtop")
+        th.rule(surface, WIDTH // 2 - 200, WIDTH // 2 + 200, 174, T.FILM_TEXT)
+        y = 250
         for line in lines:
-            for wrapped in th.wrap(line, th.serif(30, italic=True), WIDTH - 300):
-                th.text(surface, wrapped, th.serif(30, italic=True), T.FILM_TEXT, (WIDTH // 2, y), "center")
-                y += 46
-            y += 14
+            th.text(surface, line, th.serif(34, italic=True), T.FILM_TEXT, (WIDTH // 2, y), "center")
+            y += 58
         self._prompt(surface, footer, HEIGHT - 110)
         th.film_overlay(surface)
 
@@ -102,144 +110,63 @@ class Cards:
 
     def help(self, surface):
         th = self.theme
-        card = pygame.Rect(90, 50, WIDTH - 180, HEIGHT - 100)
+        card = pygame.Rect(150, 80, WIDTH - 300, HEIGHT - 160)
         self._overlay_card(surface, card)
-        th.spaced(surface, "HOW TO PLAY", th.display(26, bold=True), T.INK, (WIDTH // 2, 76), 4, "midtop")
-        y = 128
-        for head, body in HELP_LINES:
-            th.text(surface, head, th.serif(18, bold=True), T.RED, (card.x + 50, y))
-            for line in th.wrap(body, th.serif(17), card.width - 250):
-                th.text(surface, line, th.serif(17), T.INK, (card.x + 170, y))
-                y += 23
-            y += 12
-        for line in th.wrap(KEYS, th.type(13), card.width - 100):
-            th.text(surface, line, th.type(13), T.INK_SOFT, (WIDTH // 2, y + 6), "center")
-            y += 19
-        th.text(surface, "any key to close", th.serif(15, italic=True), T.INK_SOFT, (WIDTH // 2, card.bottom - 32), "center")
+        th.spaced(surface, "HOW TO PLAY", th.display(30, bold=True), T.INK, (WIDTH // 2, 112), 4, "midtop")
+        y = 180
+        for head, body in HELP:
+            th.text(surface, head, th.serif(22, bold=True), T.RED, (card.x + 60, y))
+            th.text(surface, body, th.serif(21), T.INK, (card.x + 200, y))
+            y += 52
+        th.text(surface, KEYS, th.type(15), T.INK_SOFT, (WIDTH // 2, y + 20), "center")
+        th.text(surface, "any key to close", th.serif(17, italic=True), T.INK_SOFT, (WIDTH // 2, card.bottom - 36), "center")
 
     def pause(self, surface):
         th = self.theme
-        card = pygame.Rect(WIDTH // 2 - 200, HEIGHT // 2 - 70, 400, 140)
+        card = pygame.Rect(WIDTH // 2 - 260, HEIGHT // 2 - 120, 520, 240)
         self._overlay_card(surface, card)
-        th.spaced(surface, "PAUSED", th.display(30, bold=True), T.INK, card.center, 6, "center")
-        th.text(surface, "P to continue", th.serif(16, italic=True), T.INK_SOFT, (card.centerx, card.bottom - 30), "center")
+        th.spaced(surface, "PAUSED", th.display(34, bold=True), T.INK, (WIDTH // 2, card.y + 40), 6, "midtop")
+        for i, line in enumerate(["Enter   carry on", "R   start the night again", "Q   back to the title"]):
+            th.text(surface, line, th.type(17, bold=i == 0), T.INK, (WIDTH // 2, card.y + 110 + i * 32), "midtop")
 
-    def verdict(self, surface, mouse, trials_left):
+    def won(self, surface, play, last: bool):
         th = self.theme
-        card = pygame.Rect(WIDTH // 2 - 330, 120, 660, 470)
+        card = pygame.Rect(WIDTH // 2 - 330, 130, 660, 440)
         self._overlay_card(surface, card)
-        th.spaced(surface, "YOUR VERDICT", th.display(28, bold=True), T.INK, (WIDTH // 2, 150), 4, "midtop")
-        th.text(surface, "What does Hans really rely on?", th.serif(22, italic=True), T.INK_SOFT,
-                (WIDTH // 2, 210), "center")
-        for i, cue in enumerate(CUES):
-            r = self.verdict_rects[cue]
-            hover = r.collidepoint(mouse)
-            pygame.draw.rect(surface, T.PAPER_DARK if hover else T.PAPER, r, border_radius=4)
-            pygame.draw.rect(surface, T.INK, r, 2 if hover else 1, border_radius=4)
-            key = pygame.Rect(r.x + 12, r.y + 14, 28, 28)
-            pygame.draw.rect(surface, T.INK, key, border_radius=4)
-            th.text(surface, str(i + 1), th.type(16, bold=True), T.PAPER, key.center, "center")
-            th.text(surface, CUE_LABELS[cue], th.serif(22, bold=True), T.INK, (r.x + 56, r.y + 6))
-            th.text(surface, VERDICT_HINTS[cue], th.serif(15, italic=True), T.INK_SOFT, (r.x + 56, r.y + 32))
-        note = (f"Esc  keep investigating ({trials_left} trial{'s' if trials_left != 1 else ''} left)"
-                if trials_left > 0 else "Your trials are spent. The Commission wants an answer.")
-        th.text(surface, note, th.serif(16, italic=True), T.INK_SOFT, (WIDTH // 2, 540), "center")
+        th.spaced(surface, "WELL DONE!", th.display(40, bold=True), T.GREEN, (WIDTH // 2, card.y + 38), 5, "midtop")
+        th.text(surface, f"Hans tapped door {play.carrot.name}. The carrot is his.", th.serif(22, italic=True), T.INK,
+                (WIDTH // 2, card.y + 112), "center")
+        stars(surface, (WIDTH // 2, card.y + 190), play.stars, 30)
+        verdict = {3: "Never seen. A true ghost.", 2: "Seen, but never chased.", 1: "Chased, but you made it."}
+        th.text(surface, verdict[play.stars], th.serif(20, bold=True), T.INK, (WIDTH // 2, card.y + 250), "center")
+        mins, secs = int(play.time) // 60, int(play.time) % 60
+        th.text(surface, f"time {mins}:{secs:02d}      times seen {play.seen_count}", th.type(16), T.INK_SOFT,
+                (WIDTH // 2, card.y + 290), "center")
+        nxt = "Enter   finish the story" if last else "Enter   next night"
+        th.text(surface, f"{nxt}        R   play this night again", th.type(16, bold=True), T.INK,
+                (WIDTH // 2, card.bottom - 60), "center")
 
-    def proof_intro(self, surface, verdict):
+    def caught(self, surface, play, tip_index: int):
         th = self.theme
-        card = pygame.Rect(WIDTH // 2 - 340, 140, 680, 420)
+        card = pygame.Rect(WIDTH // 2 - 330, 150, 660, 400)
         self._overlay_card(surface, card)
-        th.spaced(surface, "THE COMMISSION ASSEMBLES", th.display(26, bold=True), T.INK, (WIDTH // 2, 175), 3, "midtop")
-        th.text(surface, f"Your verdict: {CUE_LABELS[verdict]}", th.serif(20, bold=True), T.RED,
-                (WIDTH // 2, 240), "center")
-        body = ("Thirteen experts are watching, and they have seen Hans succeed a hundred times. "
-                "Success proves nothing. Show them his mistake: hide the carrot behind a door you choose, "
-                "set up the courtyard so your explanation leads him astray, and predict the wrong door he will tap.")
-        y = 280
-        for line in th.wrap(body, th.serif(19, italic=True), 580):
-            th.text(surface, line, th.serif(19, italic=True), T.INK, (WIDTH // 2, y), "center")
-            y += 30
-        th.text(surface, "Press Enter", th.serif(18, italic=True), T.INK_SOFT, (WIDTH // 2, 520), "center")
+        th.spaced(surface, "CAUGHT!", th.display(44, bold=True), T.RED, (WIDTH // 2, card.y + 40), 6, "midtop")
+        who = play.caught_by.name if play.caught_by else "A scientist"
+        th.text(surface, f"{who} caught Hans sneaking about.", th.serif(23, italic=True), T.INK,
+                (WIDTH // 2, card.y + 124), "center")
+        th.text(surface, "Tip", th.serif(18, bold=True), T.RED, (WIDTH // 2, card.y + 180), "center")
+        for i, line in enumerate(th.wrap(CAUGHT_TIPS[tip_index % len(CAUGHT_TIPS)], th.serif(20), 540)):
+            th.text(surface, line, th.serif(20), T.INK, (WIDTH // 2, card.y + 212 + i * 28), "center")
+        th.text(surface, "Enter   try again        Esc   title", th.type(16, bold=True), T.INK,
+                (WIDTH // 2, card.bottom - 56), "center")
 
-    # --- case report -----------------------------------------------------------------
-    def result(self, surface, inv):
+    def finale(self, surface, total_stars, max_stars):
+        lines = ["The Commission is baffled.", "They find no trickery at all.", "Clever Hans is famous across Europe."]
+        self.intertitle(surface, "The End", lines, "Press Enter")
         th = self.theme
-        r = inv.result
-        surface.fill(T.PAPER)
-        th.ornate_border(surface, pygame.Rect(30, 26, WIDTH - 60, HEIGHT - 52), T.INK, 10)
-        th.spaced(surface, "CASE CLOSED", th.display(34, bold=True), T.INK, (WIDTH // 2, 54), 5, "midtop")
-        subtitle = f"{inv.case.title}  ·  investigated by Professor Stumpf" if r.autopilot else inv.case.title
-        th.text(surface, subtitle, th.serif(20, italic=True), T.INK_SOFT, (WIDTH // 2, 104), "center")
-
-        x, y = 80, 150
-        ok = lambda good: ("RIGHT", T.GREEN) if good else ("WRONG", T.RED)   # noqa: E731
-        word, colour = ok(r.verdict_correct)
-        th.text(surface, "Verdict", th.serif(16, italic=True), T.INK_SOFT, (x, y))
-        th.text(surface, f"{CUE_LABELS[r.verdict]}   {word}", th.serif(24, bold=True), colour, (x, y + 20))
-        if not r.verdict_correct:
-            th.text(surface, f"Hans relied on: {CUE_LABELS[r.truth]}", th.serif(18), T.INK, (x, y + 52))
-        y += 88
-        word, colour = ok(r.prediction_correct)
-        th.text(surface, "The Commission's test", th.serif(16, italic=True), T.INK_SOFT, (x, y))
-        th.text(surface, f"Predicted door {ROMAN[r.predicted]}, Hans tapped {ROMAN[r.actual]}   {word}",
-                th.serif(22, bold=True), colour, (x, y + 20))
-        y += 76
-        th.text(surface, r.rank, th.display(32), T.INK, (x, y))
-        parts = [f"verdict {50 if r.verdict_correct else 0}", f"proof {30 if r.prediction_correct else 0}",
-                 f"{r.trials_left} unused x 5"]
-        if r.hints_used:
-            parts.append(f"{r.hints_used} advice x -{HINT_COST}")
-        th.text(surface, f"Score {r.score}   (" + ", ".join(parts) + ")", th.serif(16, italic=True), T.INK_SOFT,
-                (x, y + 46))
-        y += 84
-        cue, p = inv.stumpf.leader()
-        th.text(surface, "Professor Stumpf, reading your notebook:", th.serif(16, italic=True), T.INK_SOFT, (x, y))
-        th.text(surface, f"{CUE_LABELS[cue]}, {p:.0%} sure after {inv.trials_used} trial"
-                         f"{'s' if inv.trials_used != 1 else ''}", th.serif(19, bold=True), CUE_COLOURS[cue], (x, y + 20))
-        y += 58
-        th.text(surface, "How this Hans was trained", th.serif(16, italic=True), T.INK_SOFT, (x, y))
-        y += 22
-        for line in th.wrap(f"{inv.case.regime.trainer} Temperament: {inv.case.temperament.description}.",
-                            th.serif(17), 520):
-            th.text(surface, line, th.serif(17), T.INK, (x, y))
-            y += 23
-        if r.xray_used and not r.autopilot:
-            th.text(surface, "Unofficial: the AI X-Ray was used during this case.", th.serif(15, italic=True),
-                    T.RED, (x, y + 6))
-
-        self._trust_chart(surface, inv, pygame.Rect(690, 170, 500, 300))
-        th.text(surface, "Enter  next case        Esc  title", th.type(14), T.INK_SOFT, (WIDTH // 2, HEIGHT - 66), "center")
-        th.film_overlay(surface)
-
-    def _trust_chart(self, surface, inv, rect):
-        """Hans's trust in each cue, trial by trial: the observer effect made visible."""
-        th = self.theme
-        th.text(surface, "What your experiments did to Hans", th.serif(16, italic=True), T.INK_SOFT,
-                (rect.x, rect.y - 34))
-        th.text(surface, "trust in each cue after every trial", th.serif(13, italic=True), T.INK_FAINT,
-                (rect.x, rect.y - 15))
-        pygame.draw.rect(surface, T.PAPER_DARK, rect)
-        for v in (0.25, 0.5, 0.75):
-            yy = rect.bottom - int(v * rect.height)
-            pygame.draw.line(surface, T.PAPER_EDGE, (rect.x, yy), (rect.right, yy), 1)
-            th.text(surface, f"{v:.2f}", th.type(11), T.INK_FAINT, (rect.x - 6, yy), "midright")
-        chance = rect.bottom - int(rect.height / 3)
-        pygame.draw.line(surface, T.RED, (rect.x, chance), (rect.right, chance), 1)
-        th.text(surface, "chance", th.type(11), T.RED, (rect.right + 4, chance), "midleft")
-        history = inv.trust_history
-        n = len(history)
-        step = rect.width / max(1, n - 1)
-        for cue in CUES:
-            pts = [(rect.x + i * step, rect.bottom - h[cue]["trust"] * rect.height) for i, h in enumerate(history)]
-            if len(pts) > 1:
-                pygame.draw.lines(surface, CUE_COLOURS[cue], False, pts, 3)
-            for pt in pts:
-                pygame.draw.circle(surface, CUE_COLOURS[cue], (int(pt[0]), int(pt[1])), 3)
-        pygame.draw.rect(surface, T.INK_SOFT, rect, 1)
-        th.text(surface, "arrival", th.type(11), T.INK_SOFT, (rect.x, rect.bottom + 6), "midtop")
-        th.text(surface, "Commission", th.type(11), T.INK_SOFT, (rect.right, rect.bottom + 6), "midtop")
-        ly = rect.bottom + 30
-        for i, cue in enumerate(CUES):
-            lx = rect.x + i * 170
-            pygame.draw.line(surface, CUE_COLOURS[cue], (lx, ly + 8), (lx + 22, ly + 8), 3)
-            th.text(surface, f"{CUE_LABELS[cue]}", th.serif(14), T.INK, (lx + 28, ly))
+        th.text(surface, "(Later that year, the psychologist Oskar Pfungst worked it out: Hans was reading von Osten all along.)",
+                th.serif(18, italic=True), T.INK_FAINT, (WIDTH // 2, 470), "center")
+        stars(surface, (WIDTH // 2, 530), 3 if total_stars == max_stars else 2 if total_stars > max_stars // 2 else 1, 18,
+              empty=(60, 50, 40))
+        th.text(surface, f"{total_stars} of {max_stars} stars", th.serif(18, italic=True), T.FILM_TEXT,
+                (WIDTH // 2, 566), "center")

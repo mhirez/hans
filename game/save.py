@@ -1,46 +1,27 @@
-"""The casebook: which case you're on and how the ones you closed went. Saved as JSON."""
+"""Progress between sessions: which nights are unlocked and the best stars on each. Saved as JSON."""
 
-from datetime import date
 from pathlib import Path
 import json
 
-DEFAULT_PATH = Path(__file__).resolve().parent.parent / "saves" / "casebook.json"
+DEFAULT_PATH = Path(__file__).resolve().parent.parent / "saves" / "progress.json"
 
 
-class Casebook:
+class Progress:
     def __init__(self, path: Path | None = DEFAULT_PATH):
         self.path = path
-        self.next_case = 1
-        self.cases: list[dict] = []
+        self.unlocked = 0                  # highest night you may play
+        self.stars: dict[int, int] = {}    # night -> best stars
         if path is not None and path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                self.next_case = int(data.get("next_case", 1))
-                self.cases = list(data.get("cases", []))
+                self.unlocked = int(data.get("unlocked", 0))
+                self.stars = {int(k): int(v) for k, v in data.get("stars", {}).items()}
             except (ValueError, OSError):
                 pass
 
-    @property
-    def total_score(self) -> int:
-        return sum(c["score"] for c in self.cases)
-
-    @property
-    def solved(self) -> int:
-        return sum(1 for c in self.cases if c["verdict_correct"] and c["prediction_correct"])
-
-    def record(self, inv):
-        r = inv.result
-        self.cases.append({
-            "number": inv.case.number, "title": inv.case.title, "date": date.today().isoformat(),
-            "verdict": r.verdict, "truth": r.truth, "verdict_correct": r.verdict_correct,
-            "prediction_correct": r.prediction_correct, "score": r.score, "rank": r.rank,
-            "hints": r.hints_used, "trials_used": inv.trials_used, "xray": r.xray_used,
-        })
-        self.next_case = inv.case.number + 1
-        self.save()
-
-    def restart(self):
-        self.next_case = 1
+    def record(self, night: int, stars: int, last_night: int):
+        self.stars[night] = max(stars, self.stars.get(night, 0))
+        self.unlocked = min(last_night, max(self.unlocked, night + 1))
         self.save()
 
     def save(self):
@@ -48,7 +29,7 @@ class Casebook:
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps({"next_case": self.next_case, "cases": self.cases}, indent=2),
+            self.path.write_text(json.dumps({"unlocked": self.unlocked, "stars": self.stars}, indent=2),
                                  encoding="utf-8")
         except OSError:
             pass

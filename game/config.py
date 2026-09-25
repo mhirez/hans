@@ -1,79 +1,59 @@
-"""Every tunable number in one place, so balancing never means hunting through code.
+"""Every tunable number in one place. Distances are in tiles, times in seconds, angles in radians."""
 
-Distances are in tiles, times in seconds. Nothing in the AI packages knows about pixels;
-only the ui package multiplies by TILE.
-"""
+import math
 
 TITLE = "Hans"
 
-# --- Screen layout -------------------------------------------------------------------
+# --- Screen --------------------------------------------------------------------------
 WIDTH, HEIGHT = 1280, 720
 FPS = 60
-TILE = 34
-COLS, ROWS = 22, 18
-HEADER_H = 54                      # strip above the arena
-ARENA_X, ARENA_Y = 0, HEADER_H
-ARENA_W, ARENA_H = COLS * TILE, ROWS * TILE   # 748 x 612
-FOOTER_Y = ARENA_Y + ARENA_H       # 666
-PANEL_X = ARENA_W                  # 748
-PANEL_W = WIDTH - PANEL_X          # 532
+TILE = 40
+HUD_H = 56                          # objective bar across the top
+PLAY_Y = HUD_H
+PLAY_H = HEIGHT - HUD_H             # 664: room for 16 rows
 
-# --- Cues ----------------------------------------------------------------------------
-CUES = ("owner", "scent", "crowd")
-CUE_LABELS = {"owner": "Von Osten's posture", "scent": "Scent", "crowd": "Crowd murmur"}
-CUE_SHORT = {"owner": "von Osten", "scent": "scent", "crowd": "crowd"}
-N_DOORS = 3
-ROMAN = ("I", "II", "III")
+# --- Hans (the player) ---------------------------------------------------------------
+WALK_SPEED = 3.0
+TROT_SPEED = 5.2                    # faster than a chasing scientist, but loud
+HANS_RADIUS = 0.3
+STEP_WALK = 0.42                    # seconds between hoof-falls
+STEP_TROT = 0.26
+TROT_NOISE = 5.0                    # how far a trotting hoof-fall carries
+GRAVEL_WALK_NOISE = 3.0             # gravel is noisy even at a walk
+GRAVEL_TROT_NOISE = 7.5
+WRONG_DOOR_NOISE = 40.0             # everyone hears an empty door bang
+TAP_REACH = 1.0                     # how close to a door's front Hans must be to tap it
 
-# --- Hans's body and patience (his motivation); per-Hans values live in temperament.py -
-STUDY_TIME = 1.0            # seconds spent studying one cue source up close
-CROWD_PATIENCE_DRAIN = 1.3  # a watching crowd makes Hans restless
-MIN_OBSERVE_TIME = 1.0      # Hans always takes in the scene before acting
-PASSIVE_SENSE_INTERVAL = 0.4
-DECIDE_TIME = 0.9           # visible "thinking" pause
-TAP_INTERVAL = 0.38
-REVEAL_TIME = 1.8
-START_DELAY = 0.4
+# --- Von Osten ------------------------------------------------------------------------
+HINT_RADIUS = 2.2
+HINT_TIME = 1.4                     # seconds in his circle before he nods
+HINT_DECAY = 0.25                   # progress lost per second outside the circle
+OWNER_SPEED = 1.3
+OWNER_STAND_TIME = 5.0              # how long he stands at each stop (wandering levels)
 
-# --- Perception ----------------------------------------------------------------------
-VISUAL_RANGE = 20.0
-VISUAL_PASSIVE_MAX = 0.9
-VISUAL_FOCUSED = 0.95
-BLINKERS_FOCUSED = 0.45     # blinkers: Hans must walk right up and crane his neck
-SCENT_RANGE = 2.5
-SCENT_PASSIVE_MAX = 0.8
-SCENT_FOCUSED = 0.9
-SOUND_RANGE = 25.0
-SOUND_PASSIVE_MAX = 0.5
-SOUND_PASSIVE_FLOOR = 0.3
-SOUND_FOCUSED = 0.85
-MISREAD_RATE = 0.4          # chance of misreading = (1 - clarity) * MISREAD_RATE
-MIN_CLARITY = 0.05
-FOCUSED_CLARITY = {"owner": VISUAL_FOCUSED, "scent": SCENT_FOCUSED, "crowd": SOUND_FOCUSED}
+# --- Scientists -----------------------------------------------------------------------
+PATROL_SPEED = 1.7
+INVESTIGATE_SPEED = 2.3
+CHASE_SPEED = 3.9                   # faster than a walk, slower than a trot
+VIEW_RANGE = 6.0
+VIEW_HALF_ANGLE = math.radians(34)
+CLOSE_RANGE = 1.5                   # this close and in view: no doubt at all
+SUSPICION_RATE = 1.8                # per second at point-blank; less when far away
+SUSPICION_DECAY = 0.25
+TROT_VISIBILITY = 1.6               # a trotting horse is easier to notice
+WAYPOINT_PAUSE = 1.2
+LOOK_AROUND_TIME = 2.6
+SUSPICIOUS_GIVE_UP = 1.3            # out of sight this long while suspicious -> go and look
+LOSE_SIGHT_TIME = 2.5               # out of sight this long while chasing -> search
+ALERT_RADIUS = 9.0                  # a whistle brings colleagues this close
+CATCH_DISTANCE = 0.6
+REPLAN_TIME = 0.3
+TURN_SPEED = 5.0                    # radians per second
+SENTRY_SWEEP = 0.9                  # a stationary scientist sweeps +- this far
+CONE_RAYS = 30
 
-# --- Signal strengths emitted by the world -------------------------------------------
-OWNER_SURE = 0.9            # von Osten believes he knows (truly or misled)
-OWNER_GUESS = 0.5           # von Osten is guessing: weaker, but Hans can't tell why
-CROWD_SAW = 0.75
-CROWD_GUESS = 0.6
-SCENT_PRESENT = 0.85
-SCENT_ABSENT = 0.6
-TYPICAL_STRENGTH = 0.85     # what Hans expects a signal to be when imagining a closer look
-
-# --- Learning (Beta trust per cue type) ----------------------------------------------
-PRIOR = 1.0                 # alpha = beta = 1  ->  trust 0.5, maximum uncertainty
-DECAY = 0.97                # per trial, evidence fades back toward the prior
-REFUTED_NEGATIVE = 0.5      # "no scent here" turned out to be the carrot's door: counts half a miss
-
-# --- Attention (value of information) ------------------------------------------------
-TRAVEL_COST = 0.012         # expected-accuracy points lost per second of walking
-INVESTIGATE_THRESHOLD = 0.03
-MAX_INVESTIGATIONS = 5
-
-# --- Cases ---------------------------------------------------------------------------
-INVESTIGATION_TRIALS = 10   # later cases get fewer (see case.budget_for)
-MIN_TRIALS = 6
-TRAINING_TRIALS = 60
-TRUTH_MARGIN = 0.1          # a case's answer must lead the runner-up by this much
-HINT_COST = 5               # points per piece of advice from Professor Stumpf
-FAST_FORWARD = 3
+# --- Difficulty assist ----------------------------------------------------------------
+ASSIST_AFTER = 2                    # failed attempts per assist step
+ASSIST_MAX = 2
+ASSIST_SLOWDOWN = 0.12              # scientists lose this much speed per step
+ASSIST_CALM = 0.2                   # ...and get suspicious this much more slowly

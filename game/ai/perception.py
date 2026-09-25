@@ -1,88 +1,46 @@
-"""Perception: the only path from ground truth to Hans's mind.
+"""What the scientists can see and hear.
 
-Senses wraps the World and the Trial. Hans asks it "what can I make out of this source
-from where I'm standing?" and gets back a CueObservation, which is noisy, possibly wrong, and never
-the answer itself. Clarity depends on the cue's modality:
-
-    owner (sight)  needs line of sight, fades with distance, blinkers remove it at range
-    scent (smell)  only works close to a door
-    crowd (sound)  heard from anywhere, but only clearly from the fence
+Sight   A scientist sees by lantern light: a cone VIEW_RANGE long and 2 x VIEW_HALF_ANGLE wide,
+        blocked by anything tall (walls, hay, carts, screens). No light, no sight: Hans is
+        invisible in the dark, even right beside him.
+Hearing Hans's hooves make Noise events (trotting, gravel, an empty door banging). A noise is
+        heard by anyone within its radius; walls don't stop sound, but it only tells you *where*.
 """
 
 from dataclasses import dataclass
-import random
+import math
 
-from game.config import (N_DOORS, VISUAL_RANGE, VISUAL_PASSIVE_MAX, VISUAL_FOCUSED,
-                         BLINKERS_FOCUSED, SCENT_RANGE, SCENT_PASSIVE_MAX, SCENT_FOCUSED,
-                         SOUND_RANGE, SOUND_PASSIVE_MAX, SOUND_PASSIVE_FLOOR, SOUND_FOCUSED,
-                         MISREAD_RATE, MIN_CLARITY)
-from game.trial import Trial
-from game.world import World, Source, Point, distance
+from game.config import CONE_RAYS
+from game.level import Level, Point, distance, angle_to, angle_diff
 
 
 @dataclass(frozen=True)
-class CueObservation:
-    source_id: str
-    cue: str
-    door: int
-    polarity: int       # +1 "carrot here", -1 "not here"
-    strength: float     # how strong the signal was in the world
-    clarity: float      # how well Hans perceived it (0..1)
-    focused: bool
-    misread: bool       # debug only: Hans cannot know this
-
-    @property
-    def evidence(self) -> float:
-        return self.polarity * self.strength * self.clarity
+class Noise:
+    pos: Point
+    radius: float
+    kind: str = "hoof"          # "hoof" or "door"
 
 
-class Senses:
-    def __init__(self, world: World, trial: Trial, rng: random.Random):
-        self.world = world
-        self._trial = trial
-        self.rng = rng
+def sees(level: Level, eye: Point, facing: float, target: Point, view_range: float, half_angle: float) -> float | None:
+    """Distance to the target if it is inside the lit cone with a clear line of sight, else None."""
+    d = distance(eye, target)
+    if d > view_range:
+        return None
+    if d > 0.3 and abs(angle_diff(facing, angle_to(eye, target))) > half_angle:
+        return None
+    return d if level.line_of_sight(eye, target) else None
 
-    def sources(self) -> list[Source]:
-        return self.world.sources()
 
-    @property
-    def crowd_audible(self) -> bool:
-        return self.world.crowd_present
+def hears(listener: Point, noise: Noise) -> bool:
+    return distance(listener, noise.pos) <= noise.radius
 
-    @property
-    def wearing_blinkers(self) -> bool:
-        return self._trial.blinkers      # Hans can feel his own blinkers
 
-    def clarity(self, source: Source, pos: Point, focused: bool) -> float:
-        d = distance(pos, source.pos)
-        if source.cue == "owner":
-            if not self.world.line_of_sight(pos, source.pos):
-                return 0.0
-            if self._trial.blinkers:
-                return BLINKERS_FOCUSED if focused else 0.0
-            return VISUAL_FOCUSED if focused else VISUAL_PASSIVE_MAX * max(0.0, 1 - d / VISUAL_RANGE)
-        if source.cue == "scent":
-            return SCENT_FOCUSED if focused else SCENT_PASSIVE_MAX * max(0.0, 1 - d / SCENT_RANGE)
-        if source.cue == "crowd":
-            return SOUND_FOCUSED if focused else SOUND_PASSIVE_MAX * max(SOUND_PASSIVE_FLOOR, 1 - d / SOUND_RANGE)
-        return 0.0
-
-    def observe(self, source: Source, pos: Point, focused: bool) -> CueObservation | None:
-        signal = self._trial.signals.get(source.id)
-        if signal is None:
-            return None
-        clarity = self.clarity(source, pos, focused)
-        if clarity < MIN_CLARITY:
-            return None
-        door, polarity = signal.door, signal.polarity
-        misread = self.rng.random() < (1 - clarity) * MISREAD_RATE
-        if misread:
-            if source.cue == "scent":
-                polarity = -polarity
-            else:
-                door = self.rng.choice([d for d in range(N_DOORS) if d != door])
-        return CueObservation(source.id, source.cue, door, polarity, signal.strength, clarity, focused, misread)
-
-    def reveal(self) -> int:
-        """Feedback after Hans has tapped: the door is opened and the carrot shown."""
-        return self._trial.carrot
+def cone(level: Level, eye: Point, facing: float, view_range: float, half_angle: float,
+         rays: int = CONE_RAYS) -> list[Point]:
+    """The lit area as a polygon: the eye plus where each ray of lantern light stops."""
+    points = [eye]
+    for i in range(rays + 1):
+        a = facing - half_angle + 2 * half_angle * i / rays
+        d = level.ray(eye, a, view_range)
+        points.append((eye[0] + math.cos(a) * d, eye[1] + math.sin(a) * d))
+    return points

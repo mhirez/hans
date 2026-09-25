@@ -69,24 +69,6 @@ def von_osten(surface, feet, lean=0.0):
     pygame.draw.rect(surface, T.INK, (hx - 5, hy - 13, 10, 8), border_top_left_radius=3, border_top_right_radius=3)
 
 
-CROWD_COLOURS = [(92, 74, 60), (70, 76, 84), (112, 88, 70), (84, 64, 70), (66, 70, 58), (104, 96, 80)]
-
-
-def spectator(surface, feet, index, lean=0.0):
-    rng = random.Random(index)
-    x, y = feet
-    lx = int(lean * 2)
-    coat = CROWD_COLOURS[index % len(CROWD_COLOURS)]
-    pygame.draw.rect(surface, coat, (x - 6 + lx, y - 22, 12, 22), border_top_left_radius=4, border_top_right_radius=4)
-    hx, hy = x + lx * 2, y - 27
-    pygame.draw.circle(surface, T.SKIN, (hx, hy), 5)
-    if rng.random() < 0.5:   # bowler
-        pygame.draw.ellipse(surface, T.INK, (hx - 7, hy - 5, 14, 4))
-        pygame.draw.ellipse(surface, T.INK, (hx - 4, hy - 10, 8, 7))
-    else:                    # bonnet
-        pygame.draw.arc(surface, (150, 120, 96), (hx - 7, hy - 8, 14, 14), 0.2, math.pi - 0.2, 3)
-
-
 def carrot(surface, center, size=1.0):
     x, y = center
     s = size
@@ -172,13 +154,6 @@ def cart(surface, rect: pygame.Rect):
         pygame.draw.circle(surface, T.WOOD_DARK, (cx, rect.bottom - 8), 2)
 
 
-def fence(surface, rect: pygame.Rect):
-    cx = rect.centerx
-    pygame.draw.line(surface, T.WOOD, (cx - 4, rect.y), (cx - 4, rect.bottom), 3)
-    pygame.draw.line(surface, T.WOOD, (cx + 4, rect.y), (cx + 4, rect.bottom), 3)
-    pygame.draw.rect(surface, T.WOOD_DARK, (cx - 6, rect.y + rect.height // 2 - 3, 12, 6))
-
-
 def screen(surface, rect: pygame.Rect):
     """A folding cloth screen, like the ones Pfungst used to hide the questioner."""
     r = rect.inflate(-6, 0)
@@ -188,3 +163,50 @@ def screen(surface, rect: pygame.Rect):
         pygame.draw.rect(surface, (112, 64, 44), panel.inflate(-8, -8), 1)
         pygame.draw.line(surface, T.WOOD_DARK, panel.topleft, panel.topright, 3)
     pygame.draw.rect(surface, T.WOOD_DARK, r, 3)
+
+
+SCIENTIST_COATS = [(64, 58, 70), (78, 62, 52), (56, 66, 62), (84, 72, 60)]
+
+
+def scientist(surface, feet, facing: float, walk_phase=0.0, moving=False, index=0, alarmed=False):
+    """A scientist of the Commission: long coat, bowler hat, lantern held out toward where he looks."""
+    x, y = feet
+    coat = SCIENTIST_COATS[index % len(SCIENTIST_COATS)]
+    swing = math.sin(walk_phase) * 3 if moving else 0
+    side = 1 if math.cos(facing) >= 0 else -1
+    pygame.draw.line(surface, T.INK, (x - 4, y - 14), (x - 4 + swing, y), 3)
+    pygame.draw.line(surface, T.INK, (x + 4, y - 14), (x + 4 - swing, y), 3)
+    pygame.draw.polygon(surface, coat, [(x - 11, y - 11), (x + 11, y - 11), (x + 8, y - 36), (x - 8, y - 36)])
+    pygame.draw.line(surface, T.INK, (x, y - 35), (x, y - 12), 1)
+    hx, hy = x + side * 2, y - 42
+    pygame.draw.circle(surface, T.SKIN, (hx, hy), 7)
+    pygame.draw.circle(surface, T.INK, (hx + side * 3, hy - 1), 1)
+    pygame.draw.ellipse(surface, T.INK, (hx - 10, hy - 7, 20, 5))
+    pygame.draw.ellipse(surface, T.INK, (hx - 6, hy - 14, 12, 10))
+    lx, ly = x + side * 15, y - 22                       # lantern, held out in front
+    pygame.draw.line(surface, T.INK, (x + side * 8, y - 28), (lx, ly - 6), 2)
+    glow = (255, 190, 90) if not alarmed else (255, 110, 70)
+    pygame.draw.circle(surface, glow, (lx, ly), 6)
+    pygame.draw.rect(surface, T.INK, (lx - 5, ly - 7, 10, 14), 1)
+
+
+def gravel(surface, rect: pygame.Rect, seed: int):
+    rng = random.Random(seed)
+    pygame.draw.rect(surface, (176, 162, 136), rect)
+    for _ in range(26):
+        c = rng.choice([(140, 128, 108), (200, 188, 164), (120, 110, 94)])
+        pygame.draw.circle(surface, c, (rect.x + rng.randrange(rect.width), rect.y + rng.randrange(rect.height)),
+                           rng.choice((1, 1, 2)))
+
+
+def bubble(surface, center, char: str, font, fill, progress: float | None = None):
+    """The ? / ! over a scientist's head, with an optional ring showing how suspicious he is."""
+    x, y = center
+    pygame.draw.circle(surface, fill, (x, y), 13)
+    pygame.draw.circle(surface, T.INK, (x, y), 13, 2)
+    pygame.draw.polygon(surface, fill, [(x - 4, y + 11), (x + 4, y + 11), (x, y + 18)])
+    img = font.render(char, True, T.INK)
+    surface.blit(img, img.get_rect(center=(x, y + 1)))
+    if progress is not None:
+        pygame.draw.arc(surface, T.RED, (x - 18, y - 18, 36, 36), math.pi / 2,
+                        math.pi / 2 + max(0.01, progress) * 2 * math.pi, 4)
