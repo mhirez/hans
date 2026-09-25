@@ -1,7 +1,7 @@
 """Sound effects synthesised at start-up, so the game ships no audio files.
 
-Hoof-falls and taps are noise bursts through a low-pass filter; the bells are decaying sine
-partials; the scientist's "hmm?" and police-style whistle are pitch sweeps. If the mixer can't
+Hoof-falls, kicks and barks are noise bursts through a low-pass filter; bells and the fanfare
+are decaying sine partials; whooshes and crunches are sweeping bands of noise. If the mixer can't
 start (no audio device, CI), everything silently becomes a no-op.
 """
 
@@ -72,20 +72,41 @@ class Audio:
             out.append(env * math.sin(phase))
         return out
 
+    def _noise_sweep(self, seconds, c0, c1, rng) -> list[float]:
+        """Band of noise whose brightness slides from c0 to c1 Hz: whooshes and crunches."""
+        n = int(self.rate * seconds)
+        out, lp = [], 0.0
+        for i in range(n):
+            t = i / self.rate
+            cutoff = c0 + (c1 - c0) * t / seconds
+            lp += min(1.0, 2 * math.pi * cutoff / self.rate) * ((rng.random() * 2 - 1) - lp)
+            out.append(lp * math.sin(math.pi * t / seconds))
+        return out
+
     def _build(self):
         rng = random.Random(1904)
-        whistle = self._sweep(0.18, 2100, 2300, 0.03) + [0.0] * int(self.rate * 0.06) + self._sweep(0.32, 2300, 2000, 0.03)
+        bark = self._burst(0.09, 420, 0.05, 0.45, 2600, rng) + [0.0] * int(self.rate * 0.05) + \
+            self._burst(0.1, 380, 0.05, 0.45, 2600, rng)
+        fanfare = []
+        for f in (523, 659, 784, 1047):
+            fanfare += self._bell(0.16, [(f, 1.0, 0.12), (f * 2, 0.3, 0.08)])
+        fanfare += self._bell(0.6, [(1047, 1.0, 0.35), (1568, 0.4, 0.25)])
         self.sounds = {
-            "step": [self._sound(self._burst(0.06, 120 + 25 * k, 0.012, 0.75, 1400, rng), 0.18) for k in range(3)],
-            "trot": [self._sound(self._burst(0.08, 140 + 20 * k, 0.018, 0.7, 1800, rng), 0.5) for k in range(3)],
-            "tap": [self._sound(self._burst(0.12, 170, 0.028, 0.6, 2200, rng), 0.8)],
-            "hmm": [self._sound(self._sweep(0.35, 260, 360), 0.3)],
-            "alert": [self._sound(whistle, 0.35)],
-            "hint": [self._sound(self._bell(0.7, [(660, 1.0, 0.3), (990, 0.5, 0.2)]), 0.4)],
-            "open": [self._sound(self._burst(0.45, 150, 0.25, 0.35, 900, rng, wobble=0.25), 0.4)],
-            "won": [self._sound(self._bell(1.2, [(880, 1.0, 0.45), (1320, 0.6, 0.35), (1760, 0.3, 0.2)]), 0.5)],
-            "wrong": [self._sound(self._burst(0.5, 98, 0.16, 0.3, 500, rng), 0.55)],
-            "caught": [self._sound(self._sweep(0.6, 300, 110), 0.45)],
+            "step": [self._sound(self._burst(0.06, 120 + 25 * k, 0.012, 0.75, 1400, rng), 0.16) for k in range(3)],
+            "trot": [self._sound(self._burst(0.08, 140 + 20 * k, 0.018, 0.7, 1800, rng), 0.4) for k in range(3)],
+            "kick": [self._sound(self._burst(0.16, 90, 0.05, 0.6, 1200, rng), 0.9)],
+            "ko": [self._sound(self._sweep(0.4, 220, 80), 0.5)],
+            "hurt": [self._sound(self._burst(0.35, 110, 0.12, 0.35, 600, rng), 0.7)],
+            "whoosh": [self._sound(self._noise_sweep(0.3, 400, 3000, rng), 0.45)],
+            "bark": [self._sound(bark, 0.45)],
+            "growl": [self._sound(self._burst(0.4, 80, 0.3, 0.7, 500, rng, wobble=0.3), 0.35)],
+            "hmm": [self._sound(self._sweep(0.35, 260, 360), 0.28)],
+            "crunch": [self._sound(self._noise_sweep(0.12, 3000, 1200, rng), 0.45)],
+            "bell": [self._sound(self._bell(0.7, [(660, 1.0, 0.3), (990, 0.5, 0.2)]), 0.4)],
+            "fanfare": [self._sound(fanfare, 0.45)],
+            "caught": [self._sound(self._sweep(0.8, 300, 90), 0.5)],
+            "creak": [self._sound(self._burst(0.45, 150, 0.25, 0.35, 900, rng, wobble=0.25), 0.3)],
+            "slurp": [self._sound(self._noise_sweep(0.35, 600, 1600, rng), 0.3)],
             "click": [self._sound(self._burst(0.02, 900, 0.004, 0.4, 5000, rng), 0.25)],
         }
 

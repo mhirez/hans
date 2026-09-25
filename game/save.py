@@ -1,35 +1,32 @@
-"""Progress between sessions: which nights are unlocked and the best stars on each. Saved as JSON."""
+"""Best score between sessions, saved as JSON."""
 
 from pathlib import Path
 import json
 
-DEFAULT_PATH = Path(__file__).resolve().parent.parent / "saves" / "progress.json"
+DEFAULT_PATH = Path(__file__).resolve().parent.parent / "saves" / "best.json"
 
 
-class Progress:
+class Best:
     def __init__(self, path: Path | None = DEFAULT_PATH):
         self.path = path
-        self.unlocked = 0                  # highest night you may play
-        self.stars: dict[int, int] = {}    # night -> best stars
+        self.score = 0
+        self.wave = 0
         if path is not None and path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                self.unlocked = int(data.get("unlocked", 0))
-                self.stars = {int(k): int(v) for k, v in data.get("stars", {}).items()}
+                self.score, self.wave = int(data.get("score", 0)), int(data.get("wave", 0))
             except (ValueError, OSError):
                 pass
 
-    def record(self, night: int, stars: int, last_night: int):
-        self.stars[night] = max(stars, self.stars.get(night, 0))
-        self.unlocked = min(last_night, max(self.unlocked, night + 1))
-        self.save()
-
-    def save(self):
-        if self.path is None:
-            return
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps({"unlocked": self.unlocked, "stars": self.stars}, indent=2),
-                                 encoding="utf-8")
-        except OSError:
-            pass
+    def record(self, score: int, wave: int) -> bool:
+        """Returns True for a new best."""
+        if score <= self.score:
+            return False
+        self.score, self.wave = score, wave
+        if self.path is not None:
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self.path.write_text(json.dumps({"score": score, "wave": wave}), encoding="utf-8")
+            except OSError:
+                pass
+        return True

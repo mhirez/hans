@@ -168,12 +168,16 @@ def screen(surface, rect: pygame.Rect):
 SCIENTIST_COATS = [(64, 58, 70), (78, 62, 52), (56, 66, 62), (84, 72, 60)]
 
 
-def scientist(surface, feet, facing: float, walk_phase=0.0, moving=False, index=0, alarmed=False):
-    """A scientist of the Commission: long coat, bowler hat, lantern held out toward where he looks."""
+def _side(facing: float) -> int:
+    return 1 if math.cos(facing) >= 0 else -1
+
+
+def scientist(surface, feet, facing: float, walk_phase=0.0, moving=False, index=0, windup=0.0):
+    """A scientist of the Commission: long coat, bowler hat, butterfly net. windup 0..1 raises the net."""
     x, y = feet
     coat = SCIENTIST_COATS[index % len(SCIENTIST_COATS)]
     swing = math.sin(walk_phase) * 3 if moving else 0
-    side = 1 if math.cos(facing) >= 0 else -1
+    side = _side(facing)
     pygame.draw.line(surface, T.INK, (x - 4, y - 14), (x - 4 + swing, y), 3)
     pygame.draw.line(surface, T.INK, (x + 4, y - 14), (x + 4 - swing, y), 3)
     pygame.draw.polygon(surface, coat, [(x - 11, y - 11), (x + 11, y - 11), (x + 8, y - 36), (x - 8, y - 36)])
@@ -183,11 +187,108 @@ def scientist(surface, feet, facing: float, walk_phase=0.0, moving=False, index=
     pygame.draw.circle(surface, T.INK, (hx + side * 3, hy - 1), 1)
     pygame.draw.ellipse(surface, T.INK, (hx - 10, hy - 7, 20, 5))
     pygame.draw.ellipse(surface, T.INK, (hx - 6, hy - 14, 12, 10))
-    lx, ly = x + side * 15, y - 22                       # lantern, held out in front
-    pygame.draw.line(surface, T.INK, (x + side * 8, y - 28), (lx, ly - 6), 2)
-    glow = (255, 190, 90) if not alarmed else (255, 110, 70)
-    pygame.draw.circle(surface, glow, (lx, ly), 6)
-    pygame.draw.rect(surface, T.INK, (lx - 5, ly - 7, 10, 14), 1)
+    # the net: a pole from his hands, raised overhead as he winds up
+    a = math.radians(-30 - 100 * windup)
+    hand = (x + side * 8, y - 26)
+    tip = (hand[0] + side * math.cos(a) * 30, hand[1] + math.sin(a) * 30)
+    pygame.draw.line(surface, T.WOOD_DARK, hand, tip, 3)
+    pygame.draw.circle(surface, T.PAPER, (int(tip[0]), int(tip[1])), 9)
+    pygame.draw.circle(surface, T.INK, (int(tip[0]), int(tip[1])), 9, 2)
+    for i in (-4, 0, 4):
+        pygame.draw.line(surface, T.INK_FAINT, (tip[0] + i, tip[1] - 7), (tip[0] + i, tip[1] + 7), 1)
+
+
+def stableboy(surface, feet, facing: float, walk_phase=0.0, moving=False, windup=0.0, t=0.0):
+    """A stable boy: flat cap, waistcoat, a coil of rope; spins a loop overhead before throwing."""
+    x, y = feet
+    swing = math.sin(walk_phase) * 3 if moving else 0
+    side = _side(facing)
+    pygame.draw.line(surface, (70, 60, 50), (x - 3, y - 12), (x - 3 + swing, y), 3)
+    pygame.draw.line(surface, (70, 60, 50), (x + 3, y - 12), (x + 3 - swing, y), 3)
+    pygame.draw.rect(surface, (176, 150, 110), (x - 7, y - 30, 14, 19), border_radius=3)
+    pygame.draw.rect(surface, (96, 70, 48), (x - 7, y - 30, 14, 12), border_radius=3)
+    hx, hy = x + side, y - 36
+    pygame.draw.circle(surface, T.SKIN, (hx, hy), 6)
+    pygame.draw.circle(surface, T.INK, (hx + side * 3, hy - 1), 1)
+    pygame.draw.ellipse(surface, (90, 80, 70), (hx - 8 + side * 2, hy - 8, 14, 6))
+    pygame.draw.circle(surface, T.HAY_DARK, (x - side * 7, y - 20), 5, 2)          # rope coil at his hip
+    if windup > 0:
+        a = t * 14
+        cx, cy = hx, hy - 16
+        pygame.draw.ellipse(surface, T.HAY_DARK, (cx - 14 + math.cos(a) * 3, cy - 5, 28, 10), 2)
+        pygame.draw.line(surface, T.HAY_DARK, (x + side * 5, y - 28), (cx + math.cos(a) * 12, cy), 2)
+
+
+def dog(surface, feet, facing: float, walk_phase=0.0, moving=False, crouch=0.0):
+    """A guard dog, side-on. crouch 0..1 lowers him before a pounce."""
+    x, y = feet
+    side = _side(facing)
+    body_y = y - 16 + int(4 * crouch)
+    for i, lx in enumerate((-9, -5, 6, 10)):
+        swing = math.sin(walk_phase * 1.4 + i * math.pi / 2) * 3 if moving else 0
+        pygame.draw.line(surface, (60, 44, 32), (x + side * lx, body_y + 4), (x + side * lx + swing, y), 3)
+    pygame.draw.ellipse(surface, (92, 66, 44), (x - 14, body_y - 5, 28, 12))
+    hx = x + side * 15
+    pygame.draw.ellipse(surface, (92, 66, 44), (hx - 7, body_y - 11, 14, 11))
+    pygame.draw.polygon(surface, (92, 66, 44), [(hx + side * 4, body_y - 6), (hx + side * 11, body_y - 3),
+                                                (hx + side * 4, body_y)])
+    pygame.draw.polygon(surface, (50, 36, 26), [(hx - side * 2, body_y - 10), (hx - side * 5, body_y - 16),
+                                                (hx + side, body_y - 10)])
+    pygame.draw.circle(surface, T.INK, (hx + side * 3, body_y - 7), 1)
+    wag = math.sin(walk_phase * 2) * 4
+    pygame.draw.line(surface, (60, 44, 32), (x - side * 13, body_y - 2), (x - side * 20, body_y - 8 + wag), 3)
+
+
+def sugar(surface, center, t=0.0):
+    x, y = center
+    pygame.draw.rect(surface, (250, 248, 240), (x - 8, y - 8, 16, 16), border_radius=3)
+    pygame.draw.rect(surface, T.INK_SOFT, (x - 8, y - 8, 16, 16), 1, border_radius=3)
+    for k in range(3):
+        a = t * 2 + k * 2.1
+        sx, sy = x + math.cos(a) * 14, y + math.sin(a) * 14
+        pygame.draw.line(surface, (255, 240, 180), (sx - 3, sy), (sx + 3, sy), 1)
+        pygame.draw.line(surface, (255, 240, 180), (sx, sy - 3), (sx, sy + 3), 1)
+
+
+def horseshoe(surface, center, t=0.0):
+    x, y = center
+    glow = 16 + 3 * math.sin(t * 6)
+    halo = pygame.Surface((64, 64), pygame.SRCALPHA)
+    pygame.draw.circle(halo, (255, 214, 90, 70), (32, 32), int(glow))
+    surface.blit(halo, (x - 32, y - 32))
+    pygame.draw.arc(surface, (226, 176, 50), (x - 10, y - 11, 20, 22), math.pi * 0.0, math.pi * 1.0, 5)
+    pygame.draw.line(surface, (226, 176, 50), (x - 8, y), (x - 8, y + 9), 5)
+    pygame.draw.line(surface, (226, 176, 50), (x + 8, y), (x + 8, y + 9), 5)
+
+
+def coffee(surface, center, t=0.0):
+    x, y = center
+    pygame.draw.rect(surface, (246, 240, 228), (x - 7, y - 4, 14, 12), border_radius=3)
+    pygame.draw.rect(surface, T.INK_SOFT, (x - 7, y - 4, 14, 12), 1, border_radius=3)
+    pygame.draw.circle(surface, T.INK_SOFT, (x + 9, y + 1), 4, 1)
+    pygame.draw.rect(surface, (90, 58, 36), (x - 5, y - 3, 10, 3))
+    for k in (-3, 2):
+        pygame.draw.arc(surface, T.INK_FAINT, (x + k - 2, y - 14 + 2 * math.sin(t * 3 + k), 5, 9), 1.5, 4.7, 1)
+
+
+def stars(surface, center, t):
+    x, y = center
+    for k in range(3):
+        a = t * 5 + k * 2.1
+        sx, sy = x + math.cos(a) * 12, y + math.sin(a) * 4
+        pygame.draw.polygon(surface, (240, 200, 60), [(sx, sy - 4), (sx + 1.5, sy - 1), (sx + 4, sy), (sx + 1.5, sy + 1),
+                                                      (sx, sy + 4), (sx - 1.5, sy + 1), (sx - 4, sy), (sx - 1.5, sy - 1)])
+
+
+def heart(surface, center, size, filled):
+    x, y = center
+    colour = T.RED if filled else T.PAPER_DARK
+    r = size // 2
+    pygame.draw.circle(surface, colour, (x - r // 2 - 1, y - r // 3), r // 2 + 1)
+    pygame.draw.circle(surface, colour, (x + r // 2 + 1, y - r // 3), r // 2 + 1)
+    pygame.draw.polygon(surface, colour, [(x - r, y - r // 4), (x + r, y - r // 4), (x, y + r)])
+    pygame.draw.circle(surface, T.INK, (x - r // 2 - 1, y - r // 3), r // 2 + 1, 1)
+    pygame.draw.circle(surface, T.INK, (x + r // 2 + 1, y - r // 3), r // 2 + 1, 1)
 
 
 def gravel(surface, rect: pygame.Rect, seed: int):

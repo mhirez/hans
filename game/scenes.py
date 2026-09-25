@@ -1,18 +1,19 @@
-"""The game's screens, run by the same StateMachine class that runs the scientists.
+"""The game's screens, run by the same StateMachine class that runs the enemies.
 
-    TITLE -> INTRO (night intertitle) -> PLAY -> WON -> INTRO (next night) ... -> FINALE
-                                            \\-> CAUGHT -> PLAY (try again)
+    TITLE -> PLAY -> OVER -> PLAY (again) ...
 """
+
+import math
 
 import pygame
 
-from game.ai.ghost import Ghost
 from game.ai.state_machine import State
-from game.levels import LEVELS
 
-ENTER = (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE)
-SOUNDS = {"step": "step", "trot": "trot", "tap": "tap", "hmm": "hmm", "alert": "alert", "hint": "hint",
-          "wrong": "wrong", "won": "won", "caught": "caught"}
+ENTER = (pygame.K_RETURN, pygame.K_KP_ENTER)
+SOUNDS = {"kick": "kick", "ko": "ko", "hurt": "hurt", "tangled": "whoosh", "throw": "whoosh",
+          "scientist:swing": "whoosh", "bark": "bark", "dog:growl": "growl", "shout": "hmm", "crunch": "crunch",
+          "heal": "bell", "power": "fanfare", "wave_clear": "fanfare", "game_over": "caught", "door": "creak",
+          "slurp": "slurp"}
 
 
 def pressed(event, *keys) -> bool:
@@ -28,18 +29,9 @@ class Title(Scene):
     name = "TITLE"
 
     def on_event(self, game, event) -> bool:
-        if pressed(event, *ENTER):
-            game.demo = False
-            game.start_night(game.selected)
-        elif pressed(event, pygame.K_d):
-            game.demo = True
-            game.start_night(game.selected)
-        elif pressed(event, pygame.K_LEFT, pygame.K_a):
-            game.selected = max(0, game.selected - 1)
-            game.audio.play("click")
-        elif pressed(event, pygame.K_RIGHT):
-            game.selected = min(game.progress.unlocked, game.selected + 1)
-            game.audio.play("click")
+        if pressed(event, *ENTER, pygame.K_SPACE):
+            game.new_match()
+            game.scenes.change(PLAY)
         elif pressed(event, pygame.K_h):
             game.help_open = True
         elif pressed(event, pygame.K_ESCAPE):
@@ -49,26 +41,7 @@ class Title(Scene):
         return True
 
     def draw(self, game, surface):
-        game.cards.title(surface, LEVELS, game.selected, game.progress)
-
-
-class Intro(Scene):
-    name = "INTRO"
-
-    def on_event(self, game, event) -> bool:
-        if pressed(event, *ENTER) or event.type == pygame.MOUSEBUTTONDOWN:
-            game.new_attempt()
-            game.scenes.change(PLAY)
-        elif pressed(event, pygame.K_ESCAPE):
-            game.scenes.change(TITLE)
-        else:
-            return False
-        return True
-
-    def draw(self, game, surface):
-        spec = LEVELS[game.night]
-        footer = "Press Enter to watch the AI play" if game.demo else "Press Enter"
-        game.cards.intertitle(surface, f"Night {game.night}: {spec.name}", spec.intro, footer)
+        game.cards.title(surface, game.best.score, game.best.wave)
 
 
 class Play(Scene):
@@ -76,83 +49,77 @@ class Play(Scene):
 
     def enter(self, game):
         game.paused = False
-        game.end_timer = 0.0
-        game.ghost = Ghost() if game.demo else None
+        game.kick_queued = False
+        game.step_phase = 0
 
     def update(self, game, dt):
-        play = game.play
+        m = game.match
         if game.paused:
             return
         keys = pygame.key.get_pressed()
         move = ((keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a]),
                 (keys[pygame.K_DOWN] or keys[pygame.K_s]) - (keys[pygame.K_UP] or keys[pygame.K_w]))
-        trot = bool(keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
-        if game.ghost is not None and move != (0, 0):
-            game.ghost = None                         # the player takes over
-            game.demo = False
-        if game.ghost is not None:
-            move, trot, tap = game.ghost.act(play)
-            if tap:
-                play.tap()
-        if game.scripted_move is not None:           # tests drive Hans directly
-            move, trot = game.scripted_move, game.scripted_trot
-        play.update(dt, move, trot)
-        for e in play.drain_events():
-            game.audio.play(SOUNDS.get(e, e))
-            if e in ("won", "wrong"):
-                game.audio.play("open")
-        if play.state != "playing":
-            game.end_timer += dt
-            if game.end_timer > (0.9 if play.state == "won" else 0.7):
-                game.scenes.change(WON if play.state == "won" else CAUGHT)
+        gallop = bool(keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
+        if game.scripted is not None:                   # tests drive Hans without a keyboard
+            move, gallop, kick = game.scripted(m)
+            game.kick_queued = game.kick_queued or kick
+        m.update(dt, move, gallop, game.kick_queued)
+        game.kick_queued = False
+        for e in m.drain_events():
+            if e in SOUNDS:
+                game.audio.play(SOUNDS[e])
+        h = m.hans
+        if h.moving:
+            phase = int(h.walk_phase / math.pi)
+            if phase != game.step_phase:
+                game.step_phase = phase
+                game.audio.play("trot" if h.galloping else "step")
+        if m.state == "over" and m.state_time > 1.2:
+            game.new_best = game.best.record(m.score, m.wave.number)
+            game.scenes.change(OVER)
 
     def on_event(self, game, event) -> bool:
         if event.type != pygame.KEYDOWN:
             return False
         if game.paused:
-            if event.key in (pygame.K_RETURN, pygame.K_ESCAPE, pygame.K_p):
+            if event.key in (*ENTER, pygame.K_p, pygame.K_ESCAPE):
                 game.paused = False
             elif event.key == pygame.K_r:
-                game.new_attempt()
+                game.new_match()
                 game.paused = False
             elif event.key == pygame.K_q:
                 game.scenes.change(TITLE)
             return True
-        if event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_e):
-            game.play.tap()
-        elif event.key in (pygame.K_ESCAPE, pygame.K_p):
+        if event.key == pygame.K_SPACE:
+            game.kick_queued = True
+        elif event.key in (pygame.K_p, pygame.K_ESCAPE):
             game.paused = True
-        elif event.key == pygame.K_r:
-            game.new_attempt()
         else:
             return False
         return True
 
     def draw(self, game, surface):
+        m = game.match
         banner = None
-        if game.ghost is not None:
-            banner = f"AI DEMO   the ghost is: {game.ghost.mode}      (arrow keys: take over)"
-        game.view.draw(surface, game.play, game.xray, game.clock_time, banner)
+        if m.state == "cleared":
+            banner = (f"WAVE {m.wave.number} CLEARED", "Get ready...", "")
+        elif m.state == "playing" and m.clock < 3.2:
+            first, second = m.wave.intro
+            if m.wave.number == 1:
+                banner = ("WAVE 1", first, "ARROWS run    SHIFT gallop    SPACE kick")
+            else:
+                banner = (f"WAVE {m.wave.number}", first, second)
+        game.view.draw(surface, m, game.xray, game.clock_time, banner)
         if game.paused:
             game.cards.pause(surface)
 
 
-class Won(Scene):
-    name = "WON"
-
-    def enter(self, game):
-        game.fails = 0
-        if not game.demo:
-            game.progress.record(game.night, game.play.stars, len(LEVELS) - 1)
+class Over(Scene):
+    name = "OVER"
 
     def on_event(self, game, event) -> bool:
-        if pressed(event, *ENTER):
-            if game.night + 1 < len(LEVELS):
-                game.start_night(game.night + 1)
-            else:
-                game.scenes.change(FINALE)
-        elif pressed(event, pygame.K_r):
-            game.new_attempt()
+        if pressed(event, *ENTER, pygame.K_SPACE, pygame.K_r):
+            game.new_match()
             game.scenes.change(PLAY)
         elif pressed(event, pygame.K_ESCAPE):
             game.scenes.change(TITLE)
@@ -161,43 +128,8 @@ class Won(Scene):
         return True
 
     def draw(self, game, surface):
-        game.view.draw(surface, game.play, game.xray, game.clock_time)
-        game.cards.won(surface, game.play, game.night + 1 >= len(LEVELS))
+        game.view.draw(surface, game.match, game.xray, game.clock_time)
+        game.cards.game_over(surface, game.match, game.best.score, game.new_best)
 
 
-class Caught(Scene):
-    name = "CAUGHT"
-
-    def enter(self, game):
-        if not game.demo:
-            game.fails += 1
-
-    def on_event(self, game, event) -> bool:
-        if pressed(event, *ENTER) or pressed(event, pygame.K_r):
-            game.new_attempt()
-            game.scenes.change(PLAY)
-        elif pressed(event, pygame.K_ESCAPE):
-            game.scenes.change(TITLE)
-        else:
-            return False
-        return True
-
-    def draw(self, game, surface):
-        game.view.draw(surface, game.play, game.xray, game.clock_time)
-        game.cards.caught(surface, game.play, game.fails - 1)
-
-
-class Finale(Scene):
-    name = "FINALE"
-
-    def on_event(self, game, event) -> bool:
-        if pressed(event, *ENTER, pygame.K_ESCAPE):
-            game.scenes.change(TITLE)
-            return True
-        return False
-
-    def draw(self, game, surface):
-        game.cards.finale(surface, sum(game.progress.stars.values()), 3 * len(LEVELS))
-
-
-TITLE, INTRO, PLAY, WON, CAUGHT, FINALE = Title(), Intro(), Play(), Won(), Caught(), Finale()
+TITLE, PLAY, OVER = Title(), Play(), Over()

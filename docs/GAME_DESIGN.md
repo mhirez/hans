@@ -1,255 +1,204 @@
 # Hans: Game Design Document
 
-*A sneaky game about a clever horse.*
-AI for Games individual coursework · Python + pygame-ce · v0.3 · 25 Sep 2026
+*Catch me if you can.*
+AI for Games individual coursework · Python + pygame-ce · v0.4 · 26 Sep 2026
+**Deadline: Friday 27 November 2026, 3pm** (2–3 min video 50% + 2,000-word report 50%)
 
-> v0.3 replaces the earlier detective design (player as the scientist), which play-testing
-> showed was too hard to understand. That version is kept in git as the tag `v0.2-detective`.
+> Earlier directions are kept in git: `v0.2-detective` (player as the scientist) and `v0.3-stealth`
+> (sneak past lantern guards). Both were too much reading and thinking; v0.4 is pure action.
 
 ---
 
 ## 1. Pitch
 
-**Berlin, 1904. Everyone thinks Clever Hans can think. His secret: his owner, von Osten,
-can't help nodding toward the right answer.**
+Clever Hans is the most famous horse in Europe, and everyone wants to catch him. You play Hans
+in a 1904 courtyard: **run, gallop, kick, eat carrots, survive the waves.** Scientists with
+butterfly nets, stable boys with lassos and packs of guard dogs come through the stable doors.
+Each type is its own AI, and each wave there are more of them and they're quicker.
 
-You *are* Hans. Each night the carrot is hidden behind one of the doors. Sneak into von Osten's
-circle, catch his involuntary nod, and tap the right door with your hoof, all without the
-lantern-carrying scientists of the Commission catching you at it.
+## 2. How it plays
 
-**Understandable in 30 seconds:** arrow keys to walk, stand in von Osten's circle, walk to the
-glowing door, press Space. Stay out of the lantern light.
-
-## 2. Decisions
-
-| Topic | Decision | Why |
-|---|---|---|
-| Genre | **Stealth**, played as Hans | The previous detective version confused players: they didn't know what to do. Stealth is a genre everyone already understands, and it shows off classic game AI. |
-| Goal | Get the hint (stand in von Osten's circle), then tap that door | One clear two-step objective, always shown in the top bar with checkboxes. |
-| The AI | **Scientists**: FSM guards with lantern vision, hearing, A*, whistles to colleagues | The module's FSM / perception / pathfinding / decision-making topics, all visible on screen. |
-| Losing | A scientist reaches Hans while chasing him | Standard, fair, readable. |
-| Key rule | **You can't tap a door while being chased** | Without it, careless play won by out-walking the chase (measured, §9). |
-| Learning | **Tutorial night** + one new idea per night + contextual tips | "Didn't know what to do" was the main complaint. |
-| Look | 1904 sepia, moonlit: lantern light *is* the scientists' vision | The theme and the mechanic are the same thing. |
-| Help | Difficulty assist after repeated failures; **AI demo** (the ghost) on the title screen | You can always watch how it's done. |
-| Engine | Python + pygame-ce | As before. |
-
-## 3. How it plays
-
-| Input | Action |
+| Input | |
 |---|---|
-| Arrow keys / WASD | Walk (quiet) |
-| hold Shift | Trot: faster than a chasing scientist, but loud |
-| Space | Tap the door you're standing at |
-| Esc / P | Pause (R restart, Q title) |
-| R | Restart the night |
-| X | AI X-Ray |
-| F1 | How to play |
-| M / F11 | Mute / full screen |
-| title: ←/→, Enter, D | Choose a night, play it, or watch the AI play it |
+| Arrows / WASD | run (4.2 tiles/s) |
+| hold Shift | gallop (6.8 tiles/s): drains stamina, and enemies hear it |
+| Space | kick: everyone within 1.3 tiles is knocked back and stunned |
+| P / Esc, X, F1, M, F11 | pause, AI X-Ray, help, mute, full screen |
 
-**One night:**
-1. The carrot is hidden behind a random door (every attempt).
-2. Walk into **von Osten's circle** and stay. A ring fills. He nods, and that door **glows**.
-3. Walk to the glowing door and press **Space**. Win; stars for how unseen you stayed.
+- **A wave** is cleared by eating its carrots (7 in wave 1, then 2 more each wave). Up to 3 are on the field at once; eating one makes a crunch that enemies can hear.
+- **3 hearts.** A net, a bite, or being caught loses one; then you blink invulnerable for 1.6 s.
+- **Red warnings** tell you what's coming: a red arc (net swing), a red dashed line (a dog about to leap), a spinning rope (a lasso). Dodge, or step in and kick during the wind-up.
+- **Pick-ups:** sugar cube (+1 heart), golden horseshoe (6 s: you can't be hurt, and everyone flees; touching them knocks them out), coffee (enemies only: +1 health).
+- **Score:** carrot 10, knockout 25, wave cleared 100 × wave number. Best score is saved.
 
-**The scientists:** they see only what their **lantern** lights (the light stops at walls, hay,
-carts, screens). In the light a **?** appears and a ring fills; when it's full it becomes **!**
-and he chases you, whistling for colleagues. They also **hear**: trotting, gravel and a wrong
-door all make noise, drawn as expanding rings. Hide in the dark, wait for them to turn away.
+## 3. The enemies
 
-**Stars:** ★★★ never seen · ★★ seen but never chased · ★ chased but made it.
-
-## 4. The six nights
-
-| # | Night | New idea | Scientists |
-|---|---|---|---|
-| 0 | Learning the Trick | walking, von Osten's nod, tapping | none |
-| 1 | The Night Watch | lantern light, ? and ! | 1 patrols in front of the doors |
-| 2 | Behind the Hay | hay blocks light; a guard watches von Osten | 1 sentry (sweeping), 1 patrol |
-| 3 | Gravel and Hooves | hearing: gravel and trotting | 1 guards the quiet path, 1 patrol |
-| 4 | The Wandering Master | von Osten walks; he only nods standing still | 2 patrols |
-| 5 | The Commission | everything, four doors | patrol, sentry, side sentry, and a watcher circling von Osten |
-
-Levels are text maps in `game/levels.py` (legend in `game/level.py`), so they're easy to edit.
-
-## 5. The AI
-
-### 5.1 Scientists: finite state machine (`game/ai/scientist.py`)
+### 3.1 Shared brain (`game/ai/enemy.py`)
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PATROL
-    PATROL --> SUSPICIOUS: sees Hans
-    PATROL --> CHASE: sees Hans up close
-    PATROL --> INVESTIGATE: hears a noise / a colleague whistles
-    SUSPICIOUS --> CHASE: suspicion meter full
-    SUSPICIOUS --> INVESTIGATE: lost sight of him
-    SUSPICIOUS --> RETURN: meter emptied (just a glimpse)
-    INVESTIGATE --> SUSPICIOUS: sees Hans
-    INVESTIGATE --> RETURN: looked around, nothing
-    CHASE --> INVESTIGATE: lost him for 2.5 s (searches where last seen)
-    RETURN --> PATROL: back on his route
-    RETURN --> SUSPICIOUS: sees Hans
+    [*] --> WANDER
+    WANDER --> INVESTIGATE: hears a noise
+    WANDER --> Decide: notices Hans
+    INVESTIGATE --> Decide: notices Hans
+    INVESTIGATE --> WANDER: looked, nothing
+    SEARCH --> Decide: finds him again
+    SEARCH --> WANDER: gives up
+    Decide --> Attack: attack wins
+    Decide --> FLEE: flee wins
+    Decide --> HEAL: heal wins
+    Decide --> COVER: cover wins (stable boy)
+    Attack --> SEARCH: lost him for 3 s
+    Attack --> Decide: every 0.5 s
+    FLEE --> Decide: reason passed
+    HEAL --> Decide: drank the coffee
+    Attack --> STUNNED: kicked
+    STUNNED --> Decide: recovered
+    STUNNED --> KO: kicked again (no health left)
 ```
 
-| State | Does |
+"Attack" is a different sub-machine for each enemy type (below). States are classes on one
+reusable `StateMachine` (`game/ai/state_machine.py`), the "state classes" pattern from the FSM
+lecture, created once and never allocated at run time. The same class runs the game's screens.
+
+**Senses** (`game/ai/perception.py`, `enemy.py`):
+- **Sight:** a cone 7.5 tiles long and 120° wide, needing a clear line of sight. Hay and carts block it; troughs don't.
+- **Noticing:** sight must last a moment (faster when close) before "!". Meanwhile he does a **double take**: stops and turns toward the glimpse, shown as "?".
+- **Hearing:** a gallop carries 6 tiles, a kick 5, a crunching carrot 4.5. An unaware enemy goes to look (INVESTIGATE); an aware one updates where he thinks Hans is.
+- **Smell (dogs):** within 5.5 tiles, through hay.
+- **Memory:** the last place Hans was seen. Out of sight for 3 s, he SEARCHes there.
+- **Word of mouth:** a spotting scientist or stable boy shouts to others within 7 tiles; a bark brings the whole pack within 12.
+
+**Desirability** (`game/ai/desire.py`): when aware, each enemy scores its options:
+
+| option | score |
 |---|---|
-| PATROL | walks his route (A* between waypoints), pauses and looks around. A one-point route is a **sentry** who sweeps his lantern; a **watcher** keeps his lantern on von Osten as he walks. |
-| SUSPICIOUS | stops, stares at where he saw Hans, **?** and a filling meter |
-| INVESTIGATE | walks (A*) to a noise or the last sighting, then sweeps his lantern around |
-| CHASE | **!**, lantern turns red, **whistles** (colleagues within 9 tiles come to investigate), runs at Hans (A*, re-planned every 0.3 s) |
-| RETURN | walks (A*) back to the nearest point on his route |
+| attack | aggression × (0.4 + 0.6 × health); 0 if Hans is golden |
+| flee | 1.3 if Hans is golden, else cowardice × wounds × closeness |
+| heal | wounds × (0.4 + 0.6 × closeness of the nearest coffee he has *seen*) × 2 |
+| cover | (1.1 − 0.5 × health) if Hans is galloping at him (stable boys only) |
 
-States are classes on a reusable `StateMachine` (`game/ai/state_machine.py`), the "state classes"
-pattern from the FSM lecture. The same class runs von Osten and the game's own screens.
+The best wins, with 0.12 stickiness so they don't dither. It's re-evaluated twice a second, so a
+scientist kicked once will break off a chase for a nearby coffee, and everyone scatters the
+moment Hans turns golden (the lecture's Pac-Man EVADE).
 
-### 5.2 Perception (`game/ai/perception.py`)
+### 3.2 Scientist: butterfly net (`scientist.py`)
 
-- **Sight = lantern light**: a cone 6 tiles long and 68° wide, with a clear line of sight (sampled every 0.15 tiles against tall tiles). No light, no sight: Hans is invisible in the dark even beside a scientist. The same raycast draws the lit polygon on screen, so what you see is exactly what he sees.
-- **Suspicion**: rises only while he sees Hans, faster when close (instant within 1.5 tiles) or when Hans trots; drains when he doesn't.
-- **Hearing**: noises have a radius (walk on gravel 3, trot 5, trot on gravel 7.5, a wrong door everyone). Walls don't stop sound, but a noise only says *where*, so he has to go and look.
+**CHASE:** A* to Hans (or his last known spot), re-planned every 0.25 s → **SWING:** stops, winds
+up (the red arc), swings. It hits if Hans is still within 1.6 tiles and in front of him. The net
+outreaches the kick (1.3), so you must either dodge the wind-up or step in and kick during it.
 
-### 5.3 Pathfinding
+### 3.3 Stable boy: lasso (`stableboy.py`)
 
-Grid A* (`game/ai/pathfinding.py`: 8-way, octile heuristic, no corner cutting), cached per
-level. Used for patrols, investigating, chasing (re-planned as Hans moves), returning, and
-von Osten's walks. The X-Ray draws the paths, the explored nodes, and each patrol route.
+**POSITION:** scores ~30 tiles near Hans (ideal 3.5–6.5 tiles away, clear line of sight, short
+walk) and goes to the best → **THROW:** spins the rope, then throws where Hans *will be* (leading
+the target by his velocity, with a little human error). A hit tangles Hans for 1.8 s at half speed
+→ reload → POSITION. **COVER:** if Hans gallops at him, he runs to the nearest tile Hans can't see.
 
-### 5.4 Von Osten (`game/ai/owner.py`)
+### 3.4 Guard dog: pack (`dog.py`)
 
-A small FSM: **STANDING → NODDING** (Hans in his 2.2-tile circle with line of sight: the hint
-fills over 1.4 s; it fades slowly if Hans steps out) **→ WALKING** (on the wandering night, no
-nodding while he walks). Like the real von Osten, his cue is involuntary, not cheating.
+**SURROUND:** the pack shares out a ring 2.4 tiles around Hans, evenly spaced and starting from
+the side they come from; each dog runs to its place → **POUNCE:** crouches (red dashed line),
+leaps 3 tiles; a bite costs a heart → **RETREAT:** backs off, then circles again. They find Hans by
+smell and track his scent while wandering.
 
-### 5.5 Group behaviour and difficulty assist
+## 4. Waves and procedural generation
 
-- A chasing scientist's **whistle** brings colleagues to investigate Hans's position.
-- **Dynamic difficulty**: after every 2 failures on a night, scientists get 12% slower and 20% slower to become suspicious (up to twice). A message says "The scientists look tired tonight."
+- **Courtyards** (`game/arena.py`): each wave places 6–12 hay bales, carts and troughs at random. It keeps a clear ring inside the walls and clear space around the start and the four stable doors. Obstacles never touch each other (no dead ends), and a flood fill proves every tile is reachable; otherwise the layout is re-rolled.
+- **Waves** (`game/waves.py`): waves 1–5 are hand-made to introduce one enemy at a time (wave 1 sends its two scientists 8 s apart). From wave 6, waves are generated from a budget (4 + 0.9 × wave; scientist 1, stable boy 1.5, dog 0.8). Enemy speed grows from 0.82× to 1.35×, and **attack wind-ups shorten with it**, so later waves give you less time to react.
+- A one-line intro banner names each new enemy.
 
-### 5.6 The ghost: an AI that plays Hans (`game/ai/ghost.py`)
+## 5. Balancing by bots (`tools/autoplay.py`)
 
-Powers the title-screen demo (D) and the automated playtests:
-1. **Learns the night**: watches the patrols for 40 s and builds a **danger map** (influence map: how often each tile is lit).
-2. **Plans** with Dijkstra where lit tiles cost ×30 and gravel ×4, so its route hugs the dark.
-3. **Waits** in the dark if its next step would be lit.
-4. **Takes cover** when seen: runs (trotting) to the nearest tile that scientist can't see.
-5. **The trick**: stands in von Osten's circle until the nod, then taps.
+Two bots play 30 games each:
 
-## 6. Procedural elements
+| bot | waves reached (median) | best | died in wave 1 |
+|---|---|---|---|
+| naive: runs at carrots, kicks when anything is close | 2.5 | 4 | 7/30 |
+| player: dodges wind-ups, sidesteps lassos and pounces, kicks during wind-ups, gallops when crowded, grabs pick-ups | 5 | 7 | 3/30 |
 
-- The carrot door is random every attempt, so the hint always matters.
-- Levels are validated automatically: equal row widths, ≥ 2 doors, everything reachable, every route's waypoints exist (`python -m tools.danger_map`).
+The bots drove real changes:
+- **The net outreaches the kick.** At first the kick won every fight, and the naive bot survived 4 minutes untouched.
+- **Dogs got smell and scent tracking.** At first they wandered and rarely found Hans.
+- **Lassos got aim error.** They were hitting 52 of 56.
+- **Double takes.** Enemies turned away mid-glimpse.
+- **Wounded enemies want coffee more.** Coffee never won against attacking.
+- **Carrots are topped up every frame.** A failed spawn could soft-lock a wave.
+- **Gentler wave 1.**
 
-## 7. Module topic coverage
+## 6. Module topic coverage
 
 | Topic | Where |
 |---|---|
-| Finite state machines | Scientists (5 states), von Osten (3), game screens: one reusable class |
-| Perception | Lantern-cone vision with line of sight, suspicion meter, hearing radii |
-| Pathfinding | A* for patrol, investigate, chase (re-planned), return, von Osten |
-| Decision making | Stimulus priority (sight > sound > patrol), sentry sweeps, watchers, whistles; the ghost's wait / take-cover choices |
-| Imperfect information | Scientists only know what they see and hear, and remember a last-seen position; the player doesn't know the door until the nod |
-| Supporting: procedural / tooling | Random carrot per attempt; influence (danger) maps; automated playtesting |
+| Finite state machines | 3 enemy types on one shared FSM core (9–10 states each); game screens use the same class |
+| Desirability / motivations | attack / flee / heal / cover scores, re-evaluated twice a second |
+| Pathfinding | A* for chase, investigate, search, flee, heal, cover; re-planned while chasing |
+| Perception | sight cone + line of sight, noticing, double take, hearing, smell, memory, shouting |
+| Imperfect information | enemies only know what they sense or are told; coffee only if seen; search the last known spot |
+| Procedural generation | a fair courtyard every wave; generated waves after 5 |
 
-## 8. AI X-Ray (X)
+## 7. AI X-Ray (X)
 
-Each scientist's **state and suspicion %**, his **patrol route** (blue), current **A* path**
-(red) with explored nodes, and **last-seen marker** (red ✕); von Osten's state and hint progress.
-Lantern cones and noise rings are always visible.
+For each enemy: its **state**, its top **desire scores**, its **sight cone** (orange = unaware, red =
+aware), its **A* path**, its **last-seen marker**, a dog's **ring slot**, and a stable boy's chosen
+**throwing spot**.
 
-## 9. Balancing by automated playtest
-
-`python -m tools.playtest` plays each night 24 times with a **careless** ghost (walks straight
-there) and a **careful** one (§5.6), each starting at a random moment:
-
-| night | careless: won | careful: won | careful: avg stars | careful: avg time |
-|---|---|---|---|---|
-| 0 Learning the Trick | 24/24 | 24/24 | 3.0 | 10s |
-| 1 The Night Watch | 17/24 | 23/24 | 2.9 | 15s |
-| 2 Behind the Hay | 13/24 | 24/24 | 3.0 | 19s |
-| 3 Gravel and Hooves | 3/24 | 23/24 | 1.8 | 29s |
-| 4 The Wandering Master | 1/24 | 24/24 | 2.5 | 26s |
-| 5 The Commission | 9/24 | 21/24 | 2.5 | 23s |
-
-Careful play wins every night (≥ 87%); careless play is punished more as the nights go on. The
-table drove real changes: faster suspicion (careless strolled through the light), the
-no-tapping-while-chased rule (careless out-walked chases), night 3's guarded quiet path (the
-old layout was pure luck), and night 5's watcher (von Osten was never lit).
-
-`python -m tools.danger_map` prints each night's danger map:
-`space` never lit · `.` < 10% · `:` < 25% · `*` < 50% · `#` ≥ 50%.
-
-## 10. Look and sound
-
-- **Moonlit sepia**: the yard is drawn in daylight, darkened for night; each frame the lantern polygons cut the daylight version back in, tinted warm (red when chasing).
-- **Film**: grain, scratches, vignette, silent-film intertitles between nights.
-- **Figures from code**: Hans, von Osten (beard, slouch hat), scientists (coats, bowlers, lanterns), doors with Roman numerals, hay, carts, screens, gravel.
-- **Sound synthesised at start-up**: hoof-falls (walk / louder trot), hoof taps, the scientist's rising "hmm?", a police-style whistle, a bell for the nod and for winning, door creak, thud when caught.
-
-## 11. Code map
+## 8. Code map
 
 ```
-main.py                     entry point (--night, --xray, --seed, --no-sound)
+main.py                     entry point (--wave, --xray, --seed, --no-sound)
 game/config.py              every tunable number
-game/level.py               map parsing, walls, sight, raycasts, collision, cached A* routes
-game/levels.py              the six nights (text maps, routes, tutorial tips)
-game/play.py                one attempt: objectives, winning, catching, noise, whistles, tips, stars
+game/arena.py               procedural courtyards
+game/waves.py               hand-made and generated waves
+game/level.py               the grid: walls, sight, rays, collision, cached A*
+game/match.py               one game: waves, spawning, kicks, hits, items, lassos, score
+game/entities/hans.py       the player's horse
+game/entities/walker.py     A*-following / steering body shared by all enemies
 game/ai/state_machine.py    reusable FSM
-game/ai/scientist.py        the scientists' FSM, perception, hearing
-game/ai/owner.py            von Osten's FSM
-game/ai/perception.py       lantern cones, line of sight, hearing
+game/ai/enemy.py            shared senses, memory and states
+game/ai/desire.py           desirability scores
+game/ai/scientist.py        CHASE, SWING
+game/ai/stableboy.py        POSITION, THROW, COVER
+game/ai/dog.py              SURROUND, POUNCE, RETREAT (+ smell)
+game/ai/perception.py       sight cones, hearing
 game/ai/pathfinding.py      A*
-game/ai/ghost.py            the AI that plays Hans (danger map, safe routes, cover)
-game/entities/hans.py       the player's horse (movement, collision, hoof noise)
-game/entities/walker.py     A*-following body shared by scientists and von Osten
-game/scenes.py, app.py      screens and main loop
-game/audio.py               synthesised sound
-game/save.py                progress (unlocked nights, best stars)
-game/ui/                    theme, sprites, view (night, lanterns, HUD, tips, X-Ray), cards
-tools/playtest.py           automated playtests
-tools/danger_map.py         level checks + danger maps
-tests/                      32 tests
+game/scenes.py, app.py      title / play / game over, and the main loop
+game/audio.py               synthesised sound (no files)
+game/save.py                best score
+game/ui/                    theme, sprites, view (arena, warnings, HUD, X-Ray), cards
+tools/autoplay.py           balancing bots
+tests/                      30 tests
 ```
 
-## 12. Video plan (2–3 minutes)
+## 9. Video plan (2–3 minutes)
 
-1. **0:00** Title → "Night 0" intertitle: the story in one card.
-2. **0:15** Tutorial: walk, von Osten's circle fills, nod, the door glows, tap. The goal is instantly clear.
-3. **0:40** Night 1: a lantern cone sweeping; step into the light → **?** → step out.
-4. **1:00** X-Ray on: FSM states, patrol routes, A* paths.
-5. **1:20** Night 3: trot on gravel → noise ring → scientist INVESTIGATES; a chase: **!**, red lantern, whistle, colleague arrives, A* re-planning, Hans hides behind hay → search → RETURN → PATROL.
-6. **2:00** Night 5: the watcher circling von Osten.
-7. **2:20** The ghost (D on the title) sneaking through a night; the playtest table.
+1. **0:00** Title → wave 1: run, eat a carrot, a scientist spots you (? then !), dodge his wind-up, step in and kick.
+2. **0:30** X-Ray on: states and desire scores; kick a scientist once and watch "heal" beat "attack" as he goes for coffee.
+3. **1:00** Wave 3: a stable boy positions, leads his throw; gallop at him and he runs for cover.
+4. **1:25** Wave 4: the dog pack spreads around you (ring slots in the X-Ray), pounces from two sides; one smells you through hay.
+5. **1:50** Golden horseshoe: everyone flips to FLEE.
+6. **2:10** A new wave's courtyard layout; the bot balancing table.
 
-## 13. Report plan (2,000 words)
+## 10. Report plan (2,000 words)
 
 | Section | Words |
 |---|---|
-| Concept and why stealth suits the Clever Hans story | 150 |
-| Architecture (pure-logic AI, pygame only in the UI) | 150 |
-| Scientist FSM, state by state | 350 |
-| Perception: lantern vision, suspicion, hearing | 300 |
-| Pathfinding: A* and re-planning | 200 |
-| Decision making: priorities, sentries, watchers, whistles, difficulty assist | 250 |
-| Von Osten's FSM | 100 |
-| The ghost and the danger map | 200 |
-| Evaluation: automated playtests and how they changed the design | 200 |
-| Reflection and limitations | 100 |
+| Concept and why it suits real-time game AI | 150 |
+| The shared FSM core and the state-class pattern | 300 |
+| Perception: sight, noticing, double take, hearing, smell, memory, shouting | 300 |
+| Desirability and decision making | 300 |
+| The three enemy types and their attack states | 350 |
+| Pathfinding and steering | 150 |
+| Procedural courtyards and waves | 150 |
+| Evaluation: bot balancing and what it changed | 200 |
+| Reflection | 100 |
 
-## 14. Roadmap
+## 11. Roadmap to 27 November
 
-| Status | Item |
+| When | What |
 |---|---|
-| ✅ | Six nights with a tutorial, scientists' FSM, vision, hearing, A*, whistles, von Osten's FSM |
-| ✅ | Lantern-light rendering, HUD objectives, tips, toasts, stars, progress saving, sound |
-| ✅ | AI X-Ray, difficulty assist, AI demo, automated playtests, danger maps, 32 tests |
-| ⏳ | Human playtests: does a new player get it in 30 seconds? Tune tips and numbers |
-| ⏳ | Optional: a distraction (e.g. kick over a bucket to make a noise elsewhere) |
-| ⏳ | Record the video, write the report |
-
-## 15. Questions for the lecturer
-
-1. Is a stealth game with FSM guards a good fit for the brief? (It covers FSMs, perception, pathfinding and decision making directly.)
-2. Is the AI-playtester / danger-map tooling worth describing in the report, or should the word count stay on the guards?
-3. Python/pygame-ce confirmed for the artefact?
+| ✅ now | Playable wave game, 3 enemy AIs, X-Ray, bots, 30 tests |
+| weeks 1–2 | Play it yourself; tune what feels unfair or dull |
+| optional | A boss (Oskar Pfungst) every 5 waves; a 4th enemy (a goat that steals carrots) |
+| weeks 5–7 | Record the video (§9), write the report (§10) |
+| before 27 Nov 3pm | Submit early |

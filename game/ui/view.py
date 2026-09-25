@@ -1,320 +1,290 @@
-"""Draws a Play: the moonlit courtyard, lantern light, everyone in it, the objective bar,
-the tutorial arrow, and (press X) the AI X-Ray."""
+"""Draws a Match: the courtyard, Hans, the enemies and their warning signs, items, the HUD,
+the wave banner, and (press X) the AI X-Ray."""
 
 import math
 
 import pygame
 
-from game.config import WIDTH, TILE, HUD_H, PLAY_Y, PLAY_H, HINT_RADIUS, VIEW_RANGE, VIEW_HALF_ANGLE
+from game.config import (WIDTH, HEIGHT, TILE, HUD_H, HEARTS, STAMINA, KICK_RADIUS, NET_REACH, VIEW_RANGE,
+                         VIEW_HALF_ANGLE, DOG_POUNCE_DISTANCE, LASSO_RANGE)
+from game.ai.dog import POUNCE
 from game.ai.perception import cone
-from game.level import Level, distance
+from game.ai.scientist import SWING
+from game.ai.stableboy import THROW
+from game.level import angle_to
 from game.ui import sprites, theme as T
 from game.ui.theme import dashed_line
 
-NIGHT = (104, 100, 128)          # multiply: moonlit sepia
-LAMP = (255, 196, 110, 38)
-ALARM = (255, 90, 60, 50)
+KIND_NAMES = {"scientist": "scientist", "stableboy": "stable boy", "dog": "dog"}
 
 
-class PlayView:
+class MatchView:
     def __init__(self, theme: T.Theme):
         self.theme = theme
         self._level_id = None
-        self.day = self.night = None
-        self.mask = None
+        self.ground = None
 
-    # --- layout --------------------------------------------------------------------------
-    def origin(self, level: Level) -> tuple[int, int]:
-        return (WIDTH - level.cols * TILE) // 2, PLAY_Y + (PLAY_H - level.rows * TILE) // 2
+    def origin(self, level) -> tuple[int, int]:
+        return (WIDTH - level.cols * TILE) // 2, HUD_H + (HEIGHT - HUD_H - level.rows * TILE) // 2
 
-    def px(self, level: Level, p) -> tuple[int, int]:
+    def px(self, level, p) -> tuple[int, int]:
         ox, oy = self.origin(level)
         return int(ox + p[0] * TILE), int(oy + p[1] * TILE)
 
-    def _prepare(self, level: Level):
+    def _prepare(self, level):
         if self._level_id == id(level):
             return
         self._level_id = id(level)
         w, h = level.cols * TILE, level.rows * TILE
-        day = pygame.Surface((w, h))
+        g = pygame.Surface((w, h))
         for r in range(level.rows):
             for c in range(level.cols):
                 rect = pygame.Rect(c * TILE, r * TILE, TILE, TILE)
-                ch = level.at(c, r)
-                if ch in "#D":
-                    sprites.wall(day, rect, c * 31 + r)
-                elif ch == "g":
-                    sprites.gravel(day, rect, c * 13 + r * 7)
+                if level.at(c, r) in "#D":
+                    sprites.wall(g, rect, c * 31 + r)
                 else:
-                    sprites.floor(day, rect, c * 17 + r * 7)
+                    sprites.floor(g, rect, c * 17 + r * 7)
+        font = self.theme.display(12, bold=True)
         for r in range(level.rows):
             for c in range(level.cols):
                 rect = pygame.Rect(c * TILE, r * TILE, TILE, TILE)
                 ch = level.at(c, r)
                 if ch == "h":
-                    sprites.hay(day, rect)
+                    sprites.hay(g, rect)
                 elif ch == "t":
-                    sprites.trough(day, rect)
-                elif ch == "s":
-                    sprites.screen(day, rect)
+                    sprites.trough(g, rect)
+                elif ch == "D":
+                    sprites.door(g, rect.inflate(-4, -4), "", font)
                 elif ch == "c" and level.at(c - 1, r) != "c":
                     run = 1
                     while level.at(c + run, r) == "c":
                         run += 1
-                    sprites.cart(day, pygame.Rect(rect.x, rect.y, TILE * run, TILE))
-        # an alpha copy, so BLEND_RGBA_MULT can cut it down to the lantern cones each frame
-        self.day = day.convert_alpha() if pygame.display.get_surface() else self._alpha(day)
-        self.night = day.copy()
-        self.night.fill(NIGHT, special_flags=pygame.BLEND_MULT)
-        self.mask = pygame.Surface((w, h), pygame.SRCALPHA)
+                    sprites.cart(g, pygame.Rect(rect.x, rect.y, TILE * run, TILE))
+        self.ground = g.convert() if pygame.display.get_surface() else g
 
-    @staticmethod
-    def _alpha(surface):
-        out = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-        out.blit(surface, (0, 0))
-        return out
-
-    # --- main ----------------------------------------------------------------------------
-    def draw(self, surface, play, xray: bool, t: float, banner: str | None = None):
-        level = play.level
+    # --- main --------------------------------------------------------------------------
+    def draw(self, surface, match, xray: bool, t: float, banner=None):
+        level = match.level
         self._prepare(level)
-        ox, oy = self.origin(level)
         surface.fill(T.FILM)
-        surface.blit(self.night, (ox, oy))
-        self._lanterns(surface, play, ox, oy)
-        self._doors(surface, play, t)
-        self._owner_circle(surface, play, t)
-        self._noises(surface, play)
-        self._figures(surface, play, t)
+        surface.blit(self.ground, self.origin(level))
         if xray:
-            self._xray(surface, play)
-        self._hud(surface, play, xray)
-        top = self._banner(surface, banner) if banner else self._tip(surface, play, t)
-        self._toast(surface, play, top)
+            self._cones(surface, match)
+        self._items(surface, match, t)
+        self._warnings(surface, match)
+        self._figures(surface, match, t)
+        self._lassos(surface, match)
+        self._effects(surface, match)
+        if xray:
+            self._xray(surface, match)
+        self._hud(surface, match, xray)
+        if banner:
+            self._banner(surface, *banner)
+        self._toast(surface, match)
         self.theme.film_overlay(surface)
 
-    def _lanterns(self, surface, play, ox, oy):
-        level = play.level
-        polys = []
-        self.mask.fill((0, 0, 0, 0))
-        for s in play.scientists:
-            pts = [(x * TILE, y * TILE) for x, y in cone(level, s.pos, s.angle, VIEW_RANGE, VIEW_HALF_ANGLE)]
-            polys.append((s, pts))
-            pygame.draw.polygon(self.mask, (255, 255, 255, 255), pts)
-        lit = self.day.copy()
-        lit.blit(self.mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-        surface.blit(lit, (ox, oy))
-        glow = pygame.Surface(self.mask.get_size(), pygame.SRCALPHA)
-        for s, pts in polys:
-            pygame.draw.polygon(glow, ALARM if s.state == "CHASE" else LAMP, pts)
-        surface.blit(glow, (ox, oy))
+    # --- things on the ground ----------------------------------------------------------
+    def _items(self, surface, match, t):
+        for item in match.items:
+            x, y = self.px(match.level, item.pos)
+            bob = int(3 * math.sin(t * 4 + item.uid))
+            if item.kind == "carrot":
+                pygame.draw.ellipse(surface, (150, 128, 96), (x - 12, y + 12, 24, 7))
+                sprites.carrot(surface, (x, y + bob), 1.7)
+            elif item.kind == "sugar":
+                sprites.sugar(surface, (x, y + bob), t)
+            elif item.kind == "horseshoe":
+                sprites.horseshoe(surface, (x, y + bob), t)
+            elif item.kind == "coffee":
+                sprites.coffee(surface, (x, y), t)
 
-    def _doors(self, surface, play, t):
-        font = self.theme.display(13, bold=True)
-        pulse = 0.5 + 0.5 * math.sin(t * 5)
-        for d in play.level.doors:
-            x, y = self.px(play.level, d.tile)
-            rect = pygame.Rect(x, y, TILE, TILE)
-            won = play.state == "won" and d is play.carrot
-            opened = d.index in play.opened
-            outline = None
-            if play.hint_known and d is play.carrot and not won:
-                outline = (255, int(170 + 60 * pulse), 60)
-            sprites.door(surface, rect.inflate(-4, 0), d.name, font, won or opened, "carrot" if won else "empty",
-                         outline)
-            if play.hint_known and d is play.carrot and not won:
-                pygame.draw.rect(surface, outline, rect.inflate(10 + 6 * pulse, 10 + 6 * pulse), 2, border_radius=6)
-        door = play.door_in_reach()
-        if door is not None and play.state == "playing" and door.index not in play.opened:
-            fx, fy = self.px(play.level, door.front)
-            self._key_cap(surface, "SPACE", (fx, fy + 30))
+    def _warnings(self, surface, match):
+        """The tells: what's about to happen, so the player can react."""
+        level = match.level
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        for e in match.enemies:
+            x, y = self.px(level, e.pos)
+            if e.fsm.current is SWING and not e.swung:
+                k = SWING.progress(e)
+                r = NET_REACH * TILE
+                arc = [e.angle + math.radians(-80 + 160 * i / 12) for i in range(13)]
+                pts = [(x, y)] + [(x + math.cos(a) * r, y + math.sin(a) * r) for a in arc]
+                pygame.draw.polygon(overlay, (190, 40, 30, int(40 + 110 * k)), pts)
+            elif e.fsm.current is POUNCE and e.leap is None:
+                a = angle_to(e.pos, match.hans.pos)
+                end = self.px(level, (e.pos[0] + math.cos(a) * DOG_POUNCE_DISTANCE,
+                                      e.pos[1] + math.sin(a) * DOG_POUNCE_DISTANCE))
+                dashed_line(overlay, (190, 40, 30, 200), (x, y), end, 8, 5, 4)
+            elif e.fsm.current is THROW:
+                a = angle_to(e.pos, match.hans.pos)
+                end = self.px(level, (e.pos[0] + math.cos(a) * LASSO_RANGE, e.pos[1] + math.sin(a) * LASSO_RANGE))
+                dashed_line(overlay, (190, 40, 30, int(60 + 120 * THROW.progress(e))), (x, y - 20), end, 6, 8, 2)
+        surface.blit(overlay, (0, 0))
 
-    def _key_cap(self, surface, label, center):
-        font = self.theme.type(13, bold=True)
-        img = font.render(label, True, T.INK)
-        box = img.get_rect(center=center).inflate(14, 8)
-        pygame.draw.rect(surface, T.PAPER, box, border_radius=4)
-        pygame.draw.rect(surface, T.INK, box, 2, border_radius=4)
-        surface.blit(img, img.get_rect(center=box.center))
-
-    def _owner_circle(self, surface, play, t):
-        o = play.owner
-        cx, cy = self.px(play.level, o.pos)
-        radius = int(HINT_RADIUS * TILE)
-        ring = pygame.Surface((radius * 2 + 8, radius * 2 + 8), pygame.SRCALPHA)
-        c = radius + 4
-        colour = (255, 214, 120)
-        pygame.draw.circle(ring, (*colour, 26 if o.state != "WALKING" else 10), (c, c), radius)
-        for i in range(36):
-            if i % 2 == 0:
-                a0, a1 = i / 36 * 2 * math.pi + t * 0.3, (i + 1) / 36 * 2 * math.pi + t * 0.3
-                pygame.draw.arc(ring, (*colour, 200 if o.state != "WALKING" else 70),
-                                (4, 4, radius * 2, radius * 2), a0, a1, 2)
-        surface.blit(ring, (cx - c, cy - c))
-        if 0 < o.progress < 1 and not play.hint_known:
-            pygame.draw.arc(surface, T.GREEN, (cx - 26, cy - 92, 52, 52), math.pi / 2,
-                            math.pi / 2 + o.progress * 2 * math.pi, 6)
-        if play.hint_known and o.nodding:
-            fx, fy = self.px(play.level, play.carrot.front)
-            dashed_line(surface, (255, 214, 120), (cx, cy - 40), (fx, fy), 6, 6, 2)
-
-    def _noises(self, surface, play):
-        for noise, age in play.noises:
-            frac = age / 0.8
-            r = int(noise.radius * TILE * min(1.0, frac * 1.6))
-            if r < 4:
-                continue
-            alpha = int(200 * (1 - frac))
-            ring = pygame.Surface((r * 2 + 4, r * 2 + 4), pygame.SRCALPHA)
-            pygame.draw.circle(ring, (240, 230, 210, alpha), (r + 2, r + 2), r, 2)
-            x, y = self.px(play.level, noise.pos)
-            surface.blit(ring, (x - r - 2, y - r - 2))
-
-    def _figures(self, surface, play, t):
-        level = play.level
+    def _figures(self, surface, match, t):
+        level = match.level
         figures = []
-        o = play.owner
-        lean = 0.0
-        if o.nodding:
-            direction = 1 if play.carrot.front[0] > o.pos[0] else -1
-            lean = direction * (0.5 + 0.5 * math.sin(t * 9))
-        figures.append((o.pos[1], lambda: sprites.von_osten(surface, self.px(level, (o.pos[0], o.pos[1] + 0.35)), lean)))
-        for i, s in enumerate(play.scientists):
-            figures.append((s.pos[1], lambda s=s, i=i: sprites.scientist(
-                surface, self.px(level, (s.pos[0], s.pos[1] + 0.35)), s.angle, s.walk_phase, s.moving, i,
-                s.state == "CHASE")))
-        h = play.hans
-        tap_up = play.state == "won"
-        figures.append((h.pos[1], lambda: sprites.hans(surface, self.px(level, (h.pos[0], h.pos[1] + 0.4)), h.facing,
-                                                       h.walk_phase, h.moving, "up", tap_up)))
+        for i, e in enumerate(match.enemies):
+            figures.append((e.pos[1], lambda e=e, i=i: self._enemy(surface, level, e, t)))
+        h = match.hans
+        figures.append((h.pos[1], lambda: self._hans(surface, level, h, t)))
         for _, draw in sorted(figures, key=lambda f: f[0]):
             draw()
         font = self.theme.display(20, bold=True)
-        for s in play.scientists:
-            icon = s.icon
-            if icon:
-                x, y = self.px(level, s.pos)
-                fill = T.RED if icon == "!" else (236, 190, 70)
-                progress = s.suspicion if s.state == "SUSPICIOUS" else None
-                sprites.bubble(surface, (x, y - 72), icon, font, fill, progress)
+        for e in match.enemies:
+            x, y = self.px(level, e.pos)
+            icon = e.icon
+            top = y - 66
+            if icon == "stars":
+                sprites.stars(surface, (x, top + 20), t)
+            elif icon == "cup":
+                pygame.draw.circle(surface, T.PAPER, (x, top), 13)
+                pygame.draw.circle(surface, T.INK, (x, top), 13, 2)
+                sprites.coffee(surface, (x - 1, top + 2), t)
+            elif icon:
+                fill = {"!": T.RED, "?": (236, 190, 70), "!!": T.PAPER}[icon]
+                sprites.bubble(surface, (x, top), icon, font, fill)
+
+    def _enemy(self, surface, level, e, t):
+        x, y = self.px(level, (e.pos[0], e.pos[1] + 0.4))
+        if e.state == "KO":
+            fig = pygame.Surface((80, 80), pygame.SRCALPHA)
+            self._draw_kind(fig, e, (40, 70), t)
+            fig = pygame.transform.rotate(fig, 90 if math.cos(e.angle) < 0 else -90)
+            fig.set_alpha(max(0, 255 - int(e.timer * 150)))
+            surface.blit(fig, fig.get_rect(center=(x, y - 10)))
+            return
+        self._draw_kind(surface, e, (x, y), t)
+
+    @staticmethod
+    def _draw_kind(surface, e, feet, t):
+        if e.kind == "scientist":
+            sprites.scientist(surface, feet, e.angle, e.walk_phase, e.moving, e.uid, SWING.progress(e)
+                              if e.fsm.current is SWING else 0.0)
+        elif e.kind == "stableboy":
+            sprites.stableboy(surface, feet, e.angle, e.walk_phase, e.moving,
+                              THROW.progress(e) if e.fsm.current is THROW else 0.0, t)
+        else:
+            sprites.dog(surface, feet, e.angle, e.walk_phase, e.moving,
+                        POUNCE.progress(e) if e.fsm.current is POUNCE else 0.0)
+
+    def _hans(self, surface, level, h, t):
+        x, y = self.px(level, (h.pos[0], h.pos[1] + 0.45))
+        if h.powered:
+            halo = pygame.Surface((110, 110), pygame.SRCALPHA)
+            pygame.draw.circle(halo, (255, 214, 90, 90 + int(40 * math.sin(t * 10))), (55, 55), 42)
+            surface.blit(halo, (x - 55, y - 75))
+        if h.invulnerable > 0 and int(t * 16) % 2 == 0:
+            return                                               # blink after being hit
+        sprites.hans(surface, (x, y), h.facing, h.walk_phase, h.moving, "up", h.kick_flash > 0)
+        if h.tangled:
+            for k in range(3):
+                pygame.draw.ellipse(surface, T.HAY_DARK, (x - 22 + k * 4, y - 34 + k * 7, 44 - k * 8, 10), 2)
+
+    def _lassos(self, surface, match):
+        for lasso in match.lassos:
+            x, y = self.px(match.level, lasso.pos)
+            bx, by = self.px(match.level, lasso.thrower.pos)
+            pygame.draw.line(surface, T.HAY_DARK, (bx, by - 22), (x, y), 2)
+            pygame.draw.circle(surface, T.HAY_DARK, (x, y), 11, 3)
+
+    def _effects(self, surface, match):
+        h = match.hans
+        if h.kick_flash > 0:
+            x, y = self.px(match.level, h.pos)
+            r = int(KICK_RADIUS * TILE * (1.2 - h.kick_flash * 2))
+            pygame.draw.circle(surface, T.PAPER, (x, y), max(4, r), 3)
+        font = self.theme.display(20, bold=True)
+        for p in match.popups:
+            x, y = self.px(match.level, p.pos)
+            img = font.render(p.text, True, (250, 230, 150))
+            img.set_alpha(int(255 * (1 - p.age)))
+            surface.blit(img, img.get_rect(center=(x, y - 30 - p.age * 40)))
 
     # --- X-Ray ---------------------------------------------------------------------------
-    def _xray(self, surface, play):
-        level, th = play.level, self.theme
-        small = th.type(12, bold=True)
-        for s in play.scientists:
-            pts = [self.px(level, p) for p in s.route]
-            if len(pts) > 1:
-                for a, b in zip(pts, pts[1:] + pts[:1]):
-                    dashed_line(surface, T.BLUE, a, b, 3, 7, 2)
-            if s.path:
-                for c, r in s.explored:
-                    pygame.draw.circle(surface, (120, 150, 200), self.px(level, (c + 0.5, r + 0.5)), 2)
-                path = [self.px(level, s.pos)] + [self.px(level, p) for p in s.path]
-                for a, b in zip(path, path[1:]):
-                    dashed_line(surface, T.RED, a, b, 7, 5, 3)
-            if s.last_seen is not None and s.state in ("SUSPICIOUS", "INVESTIGATE", "CHASE"):
-                x, y = self.px(level, s.last_seen)
-                pygame.draw.line(surface, T.RED, (x - 7, y - 7), (x + 7, y + 7), 3)
-                pygame.draw.line(surface, T.RED, (x - 7, y + 7), (x + 7, y - 7), 3)
-            x, y = self.px(level, s.pos)
-            self._label(surface, f"{s.state} {s.suspicion:.0%}", (x, y + 26), small)
-        o = play.owner
-        x, y = self.px(level, o.pos)
-        self._label(surface, f"{o.state} {o.progress:.0%}", (x, y + 26), small)
+    def _cones(self, surface, match):
+        level = match.level
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        for e in match.enemies:
+            if e.state == "KO":
+                continue
+            pts = [self.px(level, p) for p in cone(level, e.pos, e.angle, VIEW_RANGE, VIEW_HALF_ANGLE, 18)]
+            pygame.draw.polygon(overlay, (255, 190, 90, 38) if not e.aware else (255, 90, 60, 45), pts)
+        surface.blit(overlay, (0, 0))
 
-    def _label(self, surface, text, center, font):
-        img = font.render(text, True, T.PAPER)
-        box = img.get_rect(center=center).inflate(8, 4)
-        pygame.draw.rect(surface, T.INK, box, border_radius=3)
-        surface.blit(img, img.get_rect(center=box.center))
+    def _xray(self, surface, match):
+        level, th = match.level, self.theme
+        small = th.type(11, bold=True)
+        for e in match.enemies:
+            if e.state == "KO":
+                continue
+            x, y = self.px(level, e.pos)
+            if e.path:
+                pts = [(x, y)] + [self.px(level, p) for p in e.path]
+                for a, b in zip(pts, pts[1:]):
+                    dashed_line(surface, T.RED, a, b, 6, 5, 2)
+            if e.last_seen is not None and e.aware and not e.sees_hans:
+                lx, ly = self.px(level, e.last_seen)
+                pygame.draw.line(surface, T.RED, (lx - 6, ly - 6), (lx + 6, ly + 6), 3)
+                pygame.draw.line(surface, T.RED, (lx - 6, ly + 6), (lx + 6, ly - 6), 3)
+            if e.kind == "dog" and e.state == "SURROUND":
+                sx, sy = self.px(level, e.slot)
+                pygame.draw.circle(surface, T.BLUE, (sx, sy), 7, 2)
+                pygame.draw.line(surface, T.BLUE, (x, y), (sx, sy), 1)
+            if e.kind == "stableboy" and e.spot_target is not None and e.state == "POSITION":
+                sx, sy = self.px(level, e.spot_target)
+                pygame.draw.rect(surface, T.BLUE, (sx - 6, sy - 6, 12, 12), 2)
+            lines = [f"{e.state}"]
+            if e.scores:
+                top = sorted(e.scores.items(), key=lambda kv: -kv[1])[:3]
+                lines.append(" ".join(f"{k[:4]} {v:.1f}" for k, v in top))
+            for i, line in enumerate(lines):
+                img = small.render(line, True, T.PAPER)
+                box = img.get_rect(center=(x, y + 22 + i * 14)).inflate(6, 2)
+                pygame.draw.rect(surface, T.INK, box, border_radius=3)
+                surface.blit(img, img.get_rect(center=box.center))
 
-    # --- HUD, tips, toasts ---------------------------------------------------------------
-    def _hud(self, surface, play, xray):
+    # --- HUD, banner, toast --------------------------------------------------------------
+    def _hud(self, surface, match, xray):
         th = self.theme
+        h = match.hans
         pygame.draw.rect(surface, T.PAPER, (0, 0, WIDTH, HUD_H))
         pygame.draw.line(surface, T.INK, (0, HUD_H - 2), (WIDTH, HUD_H - 2), 2)
-        logo = th.spaced(surface, "HANS", th.display(26, bold=True), T.INK, (16, 11), 5)
-        th.text(surface, f"Night {play.number}: {play.spec.name}", th.serif(17, italic=True), T.INK_SOFT,
-                (logo.right + 14, 17))
-        x = 470
-        steps = [(play.hint_known, "Catch von Osten's nod" if not play.hint_known
-                  else f"Von Osten nodded: door {play.carrot.name}"),
-                 (play.state == "won", "Lose him first! (hide in the dark)" if play.chased_now
-                  else f"Tap door {play.carrot.name} with SPACE" if play.hint_known else "Tap the carrot door")]
-        for i, (done, text) in enumerate(steps):
-            box = pygame.Rect(x, 16, 22, 22)
-            pygame.draw.rect(surface, T.GREEN if done else T.PAPER, box, border_radius=4)
-            pygame.draw.rect(surface, T.INK, box, 2, border_radius=4)
-            if done:
-                pygame.draw.lines(surface, T.PAPER, False, [(x + 5, 27), (x + 10, 32), (x + 17, 21)], 3)
-            else:
-                th.text(surface, str(i + 1), th.type(13, bold=True), T.INK, box.center, "center")
-            r = th.text(surface, text, th.serif(17, bold=not done), T.INK if not done else T.INK_SOFT, (x + 30, 17))
-            x = r.right + 26
-        tags = [f"{int(play.time) // 60}:{int(play.time) % 60:02d}", f"seen {play.seen_count}"]
-        th.text(surface, "    ".join(tags), th.type(14, bold=True), T.INK, (WIDTH - 16, 13), "topright")
-        th.text(surface, "SHIFT trot   SPACE tap   Esc menu" + ("   X-RAY" if xray else ""), th.type(11),
-                T.RED if xray else T.INK_SOFT, (WIDTH - 16, 33), "topright")
+        th.spaced(surface, "HANS", th.display(26, bold=True), T.INK, (16, 14), 5)
+        for i in range(HEARTS):
+            sprites.heart(surface, (158 + i * 30, 30), 22, i < h.hearts)
+        th.text(surface, "GALLOP", th.type(11, bold=True), T.INK_SOFT, (262, 12))
+        th.bar(surface, pygame.Rect(262, 28, 110, 12), h.stamina / STAMINA,
+               (226, 176, 50) if h.powered else T.BLUE)
+        wave = match.wave
+        th.text(surface, f"WAVE {wave.number}", th.display(22, bold=True), T.INK, (WIDTH // 2 - 40, 16), "topright")
+        sprites.carrot(surface, (WIDTH // 2 - 14, 30), 1.0)
+        bar = pygame.Rect(WIDTH // 2 + 2, 22, 200, 16)
+        th.bar(surface, bar, match.carrots / wave.carrots, (212, 112, 44))
+        th.text(surface, f"{match.carrots} / {wave.carrots}", th.type(13, bold=True), T.INK, bar.center, "center")
+        th.text(surface, f"SCORE {match.score}", th.display(22, bold=True), T.INK, (WIDTH - 16, 8), "topright")
+        th.text(surface, "arrows run   SHIFT gallop   SPACE kick   P pause" + ("   X-RAY" if xray else ""),
+                th.type(11), T.RED if xray else T.INK_SOFT, (WIDTH - 16, 36), "topright")
 
-    def _target_pos(self, play, target):
-        level = play.level
-        if target == "hans":
-            return self.px(level, play.hans.pos), 70
-        if target == "owner":
-            return self.px(level, play.owner.pos), 78
-        if target == "door":
-            return self.px(level, (play.carrot.tile[0] + 0.5, play.carrot.tile[1] + 0.5)), -10
-        if target == "scientist" and play.scientists:
-            s = min(play.scientists, key=lambda s: distance(s.pos, play.hans.pos))
-            return self.px(level, s.pos), 78
-        return None, 0
-
-    def _banner(self, surface, text) -> int:
+    def _banner(self, surface, title, line1, line2=""):
         th = self.theme
-        img = th.serif(21, bold=True).render(text, True, T.PAPER)
-        box = img.get_rect(midbottom=(WIDTH // 2, PLAY_Y + PLAY_H - 12)).inflate(30, 16)
-        pygame.draw.rect(surface, T.GREEN, box, border_radius=6)
-        pygame.draw.rect(surface, T.INK, box, 2, border_radius=6)
-        surface.blit(img, img.get_rect(center=box.center))
-        return box.top
+        band = pygame.Surface((WIDTH, 150), pygame.SRCALPHA)
+        band.fill((24, 18, 12, 200))
+        y = HUD_H + 190
+        surface.blit(band, (0, y))
+        th.spaced(surface, title, th.display(42, bold=True), T.FILM_TEXT, (WIDTH // 2, y + 18), 8, "midtop")
+        th.text(surface, line1, th.serif(24, italic=True), T.FILM_TEXT, (WIDTH // 2, y + 86), "center")
+        if line2:
+            th.text(surface, line2, th.serif(20), T.FILM_TEXT, (WIDTH // 2, y + 118), "center")
 
-    def _tip(self, surface, play, t) -> int:
-        """The tutorial banner and its bouncing arrow. Returns the banner's top edge."""
-        text = play.tip_text()
-        if not text or play.state != "playing":
-            return PLAY_Y + PLAY_H - 12
-        th = self.theme
-        font = th.serif(22, bold=True)
-        lines = th.wrap(text, font, 860)
-        height = 22 + 30 * len(lines)
-        box = pygame.Rect(0, 0, 920, height)
-        box.midbottom = (WIDTH // 2, PLAY_Y + PLAY_H - 12)
-        panel = pygame.Surface(box.size, pygame.SRCALPHA)
-        panel.fill((*T.PAPER, 235))
-        surface.blit(panel, box.topleft)
-        pygame.draw.rect(surface, T.RED, box, 3, border_radius=6)
-        for i, line in enumerate(lines):
-            th.text(surface, line, font, T.INK, (box.centerx, box.y + 12 + 30 * i), "midtop")
-        pos, lift = self._target_pos(play, play.tip.target)
-        if pos is not None:
-            bob = int(6 * math.sin(t * 6))
-            x, y = pos[0], pos[1] - lift + bob
-            if play.tip.target == "door":
-                y = pos[1] + 44 + bob
-                pygame.draw.polygon(surface, T.RED, [(x - 14, y + 18), (x + 14, y + 18), (x, y)])
-            else:
-                pygame.draw.polygon(surface, T.RED, [(x - 14, y - 18), (x + 14, y - 18), (x, y)])
-        return box.top
-
-    def _toast(self, surface, play, above: int):
-        if play.toast_time <= 0:
+    def _toast(self, surface, match):
+        if match.toast_time <= 0:
             return
         th = self.theme
-        img = th.serif(26, bold=True).render(play.toast, True, T.PAPER)
-        box = img.get_rect(midbottom=(WIDTH // 2, above - 12)).inflate(28, 14)
+        img = th.serif(26, bold=True).render(match.toast, True, T.PAPER)
+        box = img.get_rect(midbottom=(WIDTH // 2, HEIGHT - 26)).inflate(28, 14)
         panel = pygame.Surface(box.size, pygame.SRCALPHA)
-        panel.fill((20, 14, 8, int(210 * min(1.0, play.toast_time))))
+        panel.fill((20, 14, 8, int(210 * min(1.0, match.toast_time))))
         surface.blit(panel, box.topleft)
-        img.set_alpha(int(255 * min(1.0, play.toast_time)))
+        img.set_alpha(int(255 * min(1.0, match.toast_time)))
         surface.blit(img, img.get_rect(center=box.center))

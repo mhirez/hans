@@ -1,10 +1,9 @@
 """What the scientists can see and hear.
 
-Sight   A scientist sees by lantern light: a cone VIEW_RANGE long and 2 x VIEW_HALF_ANGLE wide,
-        blocked by anything tall (walls, hay, carts, screens). No light, no sight: Hans is
-        invisible in the dark, even right beside him.
-Hearing Hans's hooves make Noise events (trotting, gravel, an empty door banging). A noise is
-        heard by anyone within its radius; walls don't stop sound, but it only tells you *where*.
+Sight   An enemy sees in a cone VIEW_RANGE long and 2 x VIEW_HALF_ANGLE wide, blocked by anything
+        tall (walls, hay, carts). Behind him or behind a hay bale, Hans is invisible to him.
+Hearing Hans's gallop and his kicks make Noise events. A noise is heard by anyone within its
+        radius; walls don't stop sound, but it only tells you *where*.
 """
 
 from dataclasses import dataclass
@@ -37,7 +36,7 @@ def hears(listener: Point, noise: Noise) -> bool:
 
 def cone(level: Level, eye: Point, facing: float, view_range: float, half_angle: float,
          rays: int = CONE_RAYS) -> list[Point]:
-    """The lit area as a polygon: the eye plus where each ray of lantern light stops."""
+    """The seen area as a polygon: the eye plus where each ray of sight stops."""
     points = [eye]
     for i in range(rays + 1):
         a = facing - half_angle + 2 * half_angle * i / rays

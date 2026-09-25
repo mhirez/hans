@@ -1,13 +1,12 @@
 # Hans
 
-*A sneaky game about a clever horse.* Berlin, 1904.
+*Catch me if you can.* Berlin, 1904.
 
-Everyone thinks Clever Hans can think. His secret: his owner, von Osten, can't help nodding
-toward the right answer. **You are Hans.** Sneak into von Osten's circle, catch his nod, and tap
-the right door with your hoof, without the lantern-carrying scientists of the Commission
-catching you at it.
+Clever Hans is the most famous horse in Europe, and everyone wants to catch him. Run around the
+courtyard eating carrots, buck-kick the scientists, dodge the stable boys' lassos, and don't let
+the guard dogs corner you. Each wave brings more of them, and they get quicker.
 
-![A scientist chases Hans (!) while another grows suspicious (?)](docs/images/chase.png)
+![A scientist winds up his net (the red arc) while Hans dodges](docs/images/net-swing.png)
 
 ## Play
 
@@ -18,37 +17,36 @@ pip install -r requirements.txt
 python main.py
 ```
 
-1. **Arrow keys** to walk (hold **Shift** to trot: fast but loud).
-2. Stand in **von Osten's circle** until he nods. The right door starts to glow.
-3. Walk to it and press **Space**.
-
-Scientists see only what their **lantern** lights: **?** means suspicious, **!** means chasing.
-Hide in the dark and behind hay; trotting and gravel make noise they hear. You can't tap a door
-while you're being chased, so lose him first.
-
-Night 0 is a tutorial. Stuck? Press **D** on the title screen to **watch the AI play** the night.
-
 | Key | |
 |---|---|
-| Arrows / WASD | walk |
-| Shift | trot |
-| Space | tap a door |
-| Esc | pause (R restart, Q title) |
-| X | AI X-Ray |
-| F1 | how to play |
-| M / F11 | mute / full screen |
+| Arrows / WASD | run |
+| hold Shift | gallop: fast, but it tires you and they hear it |
+| Space | kick: knocks down anyone close |
+| P / Esc | pause |
+| X | AI X-Ray: see what every enemy is thinking |
+| F1 / M / F11 | help / mute / full screen |
 
-Options: `--night 3` (start on a night), `--xray`, `--seed 42`, `--no-sound`.
+**Goal:** eat the carrots to clear each wave. You have 3 hearts. A **red warning** means an attack
+is coming: a net swing, a dog's pounce, or a lasso. Get out of the way, or step in and kick first.
+A **sugar cube** gives a heart back; a **golden horseshoe** makes everyone run from *you*.
+
+Options: `--wave 4` (start later), `--xray`, `--seed 42`, `--no-sound`.
 
 ## The AI
 
-| Technique | Where | What it does |
+Every enemy is a finite state machine with senses and motivations.
+
+| | States | What makes it smart |
 |---|---|---|
-| Finite state machines | [`scientist.py`](game/ai/scientist.py), [`owner.py`](game/ai/owner.py), [`state_machine.py`](game/ai/state_machine.py) | Scientists: PATROL → SUSPICIOUS → CHASE / INVESTIGATE → RETURN. Von Osten: STANDING → NODDING / WALKING |
-| Perception | [`perception.py`](game/ai/perception.py) | Lantern-cone vision with line of sight (the light on screen *is* their vision), a suspicion meter, hearing radii |
-| Pathfinding | [`pathfinding.py`](game/ai/pathfinding.py) | A* for patrols, investigating, chasing (re-planned every 0.3 s) and returning |
-| Decision making | [`scientist.py`](game/ai/scientist.py), [`play.py`](game/play.py) | Sight beats sound beats patrol; sentries sweep; a watcher keeps his lantern on von Osten; whistles bring colleagues; difficulty assist |
-| An AI that plays Hans | [`ghost.py`](game/ai/ghost.py) | Influence ("danger") map, safe-route Dijkstra, wait in the dark, run for cover. Powers the demo and the playtests |
+| **Scientist** (net) | WANDER, INVESTIGATE, SEARCH, CHASE, SWING, STUNNED, FLEE, HEAL, KO | A* chase re-planned 4x a second; a visible wind-up; when kicked he weighs attacking vs fleeing vs **going for a coffee he's seen** |
+| **Stable boy** (lasso) | ... POSITION, THROW, COVER | Scores nearby tiles to find a good throwing spot; **leads his throw** to where Hans is going; **hides behind hay** when charged |
+| **Guard dog** | ... SURROUND, POUNCE, RETREAT | **Pack tactics**: the pack shares out a ring around Hans and attacks from several sides; finds Hans by **smell** through hay |
+
+- **Perception:** a 120° sight cone with line of sight (hay and carts block it), a double take on a glimpse, hearing (gallops, kicks, crunching carrots), smell (dogs), and memory of where Hans was last seen.
+- **Decision making:** desirability scores for attack / flee / heal / cover ([`desire.py`](game/ai/desire.py)), re-evaluated twice a second, with a little stickiness so they don't dither.
+- **Pathfinding:** A* on the courtyard grid for chasing, investigating, searching, fleeing, fetching coffee and finding cover.
+- **Procedural generation:** every wave gets a new courtyard layout (checked for fairness and connectivity), and waves beyond 5 are generated from a growing budget.
+- **Evade:** the golden horseshoe flips everyone into FLEE, like the Pac-Man ghosts in the FSM lecture.
 
 Full design, balancing data, video script and report plan: **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**.
 
@@ -56,20 +54,16 @@ Full design, balancing data, video script and report plan: **[docs/GAME_DESIGN.m
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest                  # 32 tests
-python -m tools.playtest          # careless vs careful AI players on every night
-python -m tools.danger_map        # how often each tile is lit, plus level checks
+python -m pytest             # 30 tests
+python -m tools.autoplay     # bots play many games: how far does a sensible player get?
 ```
 
 ## Screens
 
 | | |
 |---|---|
-| ![Title](docs/images/title.png) | ![Tutorial: von Osten nods at door III](docs/images/tutorial.png) |
-| ![AI X-Ray: states, routes, A* paths](docs/images/xray.png) | ![The Commission: a watcher circles von Osten](docs/images/commission.png) |
+| ![Title](docs/images/title.png) | ![Wave 1](docs/images/wave1.png) |
+| ![The dog pack surrounds Hans](docs/images/pack.png) | ![Golden Hans: now they run](docs/images/golden.png) |
+| ![AI X-Ray: states, desires, sight cones, paths](docs/images/xray.png) | ![Caught!](docs/images/caught.png) |
 
-*Historical note:* Clever Hans, Wilhelm von Osten and the 1904 Commission are real; later that
-year the psychologist Oskar Pfungst showed that Hans was reading his questioner's involuntary
-cues. The sneaking, the lanterns and the carrot doors are this game's invention.
-
-*The earlier detective version of this project is kept as the git tag `v0.2-detective`.*
+*Earlier versions of this project are kept as git tags: `v0.2-detective` and `v0.3-stealth`.*
