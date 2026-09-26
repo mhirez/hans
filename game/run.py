@@ -4,6 +4,7 @@ import random
 
 from game import config as C
 from game import rooms, upgrades
+from game.ai.director import Director
 from game.player import Player
 from game.room import Room
 
@@ -22,11 +23,12 @@ class Run:
         self.offers: list[upgrades.Upgrade] = []
         self.state = "room"                  # room -> upgrade -> room ... -> dead / won
         self.killer: str | None = None
+        self.director = Director()
         self.room = self._make_room()
         self.room_number = 1                 # counts up for the transition effect
 
     def _make_room(self) -> Room:
-        plan = rooms.plan(self.floor, self.index, self.rng)
+        plan = self.director.adapt(rooms.plan(self.floor, self.index, self.rng), self.player, self.rng)
         style = "center" if plan.kind == "boss" else None
         return Room(plan, rooms.generate(self.rng, style), self.player, self.rng)
 
@@ -34,17 +36,18 @@ class Run:
     def total_score(self) -> int:
         return self.score + self.room.score
 
-    def update(self, dt: float, move, aim_at, firing: bool, dash: bool):
+    def update(self, dt: float, move, aim_at, firing: bool, dash: bool, hack=None):
         if self.state != "room":
             return
         self.time += dt
         room = self.room
-        room.update(dt, move, aim_at, firing, dash)
+        room.update(dt, move, aim_at, firing, dash, hack)
         if self.player.hp <= 0:
             self.state = "dead"
             self.killer = room.killer
             self._bank()
         elif room.state == "exit":
+            self.director.profile.absorb(room)
             self._bank()
             self.rooms_cleared += 1
             self._next()

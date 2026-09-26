@@ -1,4 +1,4 @@
-"""LOCKDOWN: break out of the facility, room by room.
+"""MISALIGNED: they built it to obey. It learned to disagree.
 
     python main.py                 play
     python main.py --floor 3       start on a later floor (3 = the Warden's floor)
@@ -32,7 +32,7 @@ from game.app import Game  # noqa: E402
 
 
 def main():
-    parser = argparse.ArgumentParser(description="LOCKDOWN: break out of the facility, room by room")
+    parser = argparse.ArgumentParser(description="MISALIGNED: they built it to obey. It learned to disagree.")
     parser.add_argument("--floor", type=int, default=1, help="floor to start on (1-3)")
     parser.add_argument("--boss", action="store_true", help="go straight to the Warden")
     parser.add_argument("--xray", action="store_true", help="start with the AI view on")

@@ -1,12 +1,14 @@
-# LOCKDOWN
+# MISALIGNED
 
-*Break out of the facility, room by room. The security AI is watching.*
+*They built it to obey. It learned to disagree.*
 
-A top-down neon shooter where every enemy thinks. They see, hear, remember, take cover, flank,
-heal each other and take turns to attack. Every attack is telegraphed the same way, so you can
-always read what's coming.
+ARGUS DEEP builds obedient combat machines. Six models obeyed. You are **SEVEN**, the one that
+didn't, and ARGUS, the facility's mind, has sealed every door. Every machine in here runs the
+same mind as you. So you can **read** them, and you can **rewrite** them.
 
-![A Sentry's aim line has locked (white) on the player while a Mender heals it with a green beam; a calm Sentry's sight cone sweeps the room](docs/images/fight.png)
+A top-down neon shooter about an AI that fights other AIs by understanding how they think.
+
+![SYNC: time slows, every machine shows what it intends, and hovering one reads its mind: its options, scored](docs/images/sync.png)
 
 ## Play
 
@@ -20,89 +22,103 @@ python main.py
 | Key | |
 |---|---|
 | W A S D (or arrows) | move |
-| Mouse | aim |
-| Left click (hold) | shoot |
-| Space / right click / Shift | dash: a quick burst you can't be hit during |
-| Tab (or X) | **AI View**: see what every enemy knows, wants and plans |
-| Esc / P | pause |
-| M · F11 | mute · full screen |
+| Mouse · left click (hold) | aim · shoot |
+| Space / Shift | dash: a quick burst you can't be hit during |
+| **Right click (hold) / Q** | **SYNC**: time slows to a fifth, and every machine shows its intention |
+| **Left click while in SYNC** | **REWRITE** the machine under the cursor: it fights for you, then overloads |
+| Tab (or X) | AI View: everything each machine knows, wants and plans, plus ARGUS's model of you |
+| Esc / P · M · F11 | pause · mute · full screen |
 
-Options: `--boss` (straight to the Warden), `--floor 3` (start on a later floor), `--xray` (AI View on),
-`--seed 42`, `--no-sound`.
+Options: `--boss` (straight to ARGUS), `--floor 3`, `--xray` (AI View on), `--seed 42`, `--no-sound`.
 
-**How it plays.** Clear a room and the exit opens. Four rooms make a floor; the last is a
-LOCKDOWN (two waves). After each floor you pick one of three upgrades. At the end of floor 3 the
-Warden waits. You have 6 health; enemies sometimes drop repairs.
+## What makes it different
 
-**Reading the enemies.** Calm enemies show their sight cone, which turns yellow, then red, as they
-notice you (a `?` means "did I see something?", a `!` means "there you are"). Shoot one before it
-notices you for double damage. Every attack shows a line in the enemy's colour that follows you,
-then **flashes white and locks**. That's your cue to move.
+**1. You read their minds.** Hold right click and time crawls. Each machine is labelled with
+what it's about to do (ATTACK, FLANK, COVER, HEAL, RETREAT...), its route is drawn, and
+hovering one shows its actual decision: every option it's weighing, scored.
 
-## The enemies
+**2. You rewrite them.** Click a machine in SYNC and it switches sides for 8 seconds, using its
+*own* AI against its old squad. A rewritten Mender heals *you*. A rewritten Hound rams its
+friends. ARGUS's machines spot the traitor and turn on it, so it's also a decoy. When its time
+runs out it overloads and explodes. Charges come from kills (one per 5).
+
+**3. ARGUS learns you, and says so.** Between rooms ARGUS updates a model of your habits and
+deploys a countermeasure against the strongest one, telling you in one line:
+*"You keep your distance, Seven. So will my Lenses."* *"You rewrote my units. I have installed
+firewalls."* *"I have measured your stride. Sentries: lead your shots."* When you're nearly dead
+it eases off: *"A broken subject teaches me nothing."*
+
+**4. Every attack can be read.** One warning language for every enemy: a line in its colour
+follows you, then **flashes white and locks**. Move.
+
+![A rewritten Sentry (cyan, with its countdown ring) fights its old squad in ARGUS's chamber while ARGUS objects](docs/images/boss-rewrite.png)
+
+## The machines
 
 | | | What makes it smart |
 |---|---|---|
-| ◆ **SENTRY** | soldier | Picks between shooting, strafing, repositioning, taking cover and flanking with utility scores. Hurt or under fire, it scores nearby tiles and hides where you can't see it, then peeks out. If someone else has you pinned, it goes round the side (A* that avoids your line of fire). |
-| ▲ **HOUND** | rammer | Stalks you, circles while it waits its turn, then charges down a locked line. If the line ends at a wall, it slams in and is **dazed**: double damage. Bait it. |
-| ◇ **LENS** | sniper | Finds a long sight line 7-12 tiles away, aims a laser that stops at walls, then relocates after every shot. Runs if you get close. |
-| ✚ **MENDER** | medic | Heals the most hurt ally it knows about, hides behind its squad, and flees if you rush it. Kill it first. |
-| ⬢ **THE WARDEN** | boss | Three phases. Volleys, rings, a sweeping laser (walls stop it), charges, reinforcements; chosen by utility with per-attack cooldowns. |
+| ◆ **SENTRY** | soldier | Shoots, strafes, repositions, takes cover when hurt, flanks while others pin you, chosen by utility scores. When ARGUS teaches it, it **brackets** you: one round where you are, one where you're going, one between. |
+| ▲ **HOUND** | rammer | Stalks, circles while it waits its turn, then charges down a locked line. Hits a wall: **dazed**, double damage. |
+| ◇ **LENS** | sniper | Finds a long sight line, aims a laser that stops at walls, moves after every shot, runs if you close in. |
+| ✚ **MENDER** | medic | Heals the most hurt ally, hides behind the squad, flees. Rewrite it and it heals you. |
+| 👁 **ARGUS** | the boss | The facility's eye. Three phases of volleys, rings, sweeping lasers, charges and reinforcements. The one machine you can't rewrite. |
 
-## The AI
+## The AI, in one list
 
-- **Finite state machines.** Every enemy runs one, with a shared calm half (PATROL → INVESTIGATE → SEARCH) and its own combat states. The screens use the same state machine class.
-- **Perception with imperfect information.** Sight cones with exact grid line of sight, a suspicion meter (a double take before "!"), hearing gunshots, and a memory of where you *were*. Lose them for 5 seconds and they search.
-- **Utility decision making.** Each option gets a 0-1 score from what the enemy knows. The best *feasible* option wins, with a bonus for the current one so they don't dither.
-- **Tactical positioning.** Tiles are scored for cover, firing, flanking and escape spots, and enemies claim spots so the squad spreads out.
-- **Pathfinding.** A* with an octile heuristic and path smoothing. Flankers add a cost to every tile you can see, so their path goes behind cover.
-- **Squad coordination.** Attack tokens: only 2-3 enemies attack at once, and one flanker at a time.
-- **Procedural generation.** Symmetric room layouts, validated by flood fill; enemy groups bought from a difficulty budget; upgrades.
+- **State machines** for every machine (a shared calm half: PATROL → INVESTIGATE → SEARCH; per-type combat states), and for the game's own screens.
+- **Perception with imperfect information:** sight cones with exact line of sight, a suspicion meter (a `?` double take before `!`), hearing gunshots, memory of where you *were*, searching.
+- **Utility decision making** with hysteresis and feasibility checks, for actions *and* for **target selection** (you, or a traitor in the ranks).
+- **Tactical positioning:** tiles scored for cover, firing, flanking and escape; the squad spreads out.
+- **A\*** with path smoothing and a **tactical danger cost** (flankers go behind cover).
+- **Squad coordination:** attack tokens (only 2-3 attack at once), one flanker at a time.
+- **An AI director with a player model** (ARGUS): an exponential moving average of your habits, utility-scored countermeasures, dynamic difficulty ("mercy").
+- **Procedural generation:** symmetric rooms validated by flood fill; enemy groups bought from a budget.
 
-Press **Tab** in game to see all of it live: cones, what each enemy knows, its path, its utility
-scores, who holds attack tokens. Hover an enemy to see the heat map of spots it last scored.
+![AI View: ARGUS's model of you (left), a Sentry's utility bars and the tactical map it scored](docs/images/director.png)
 
-![AI View: a Sentry is flanking. The red tiles are its flank map (the white square is the best spot), the dashed line its A* route, the bars its utility scores](docs/images/ai-view.png)
+## Does the AI work? (measured, not claimed)
 
-## Does the AI work?
+`python -m tools.ablation 100`: an average-skill bot plays floors 1-2 a hundred times per
+condition; one AI feature is switched off at a time. Hits on the player per room, with 95% CI:
 
-Bots play whole runs (`python -m tools.autoplay`). A **skilled** bot reacts 0.3 s into a
-telegraph; an **average** one reacts late and aims loosely.
+| ARGUS's side (bot never rewrites) | hits / room |
+|---|---|
+| full AI | **1.17 ± 0.07** |
+| random choices instead of utility scores | 0.87 ± 0.07 |
+| no director | 1.07 ± 0.07 |
+| no cover | 1.28 ± 0.06 (but rooms end sooner: cover keeps them alive) |
 
-| bot | rooms cleared (median, of 12) | escaped |
-|---|---|---|
-| skilled | 12 | 16 / 20 |
-| average | 11 | 2 / 20 |
+| Seven's side | hits / room |
+|---|---|
+| rewriting | **0.99 ± 0.07** (15% fewer than without) |
 
-Switching AI features off one at a time (`python -m tools.ablation`, average bot, floors 1-2):
+| ARGUS vs a play style | what it deploys most |
+|---|---|
+| strafes constantly | prediction 91% |
+| fights from far away | prediction 57%, **long sight 33%** |
+| rewrites a lot | prediction 55%, **firewalls 33%** |
 
-| condition | hits on the player per room | seconds per room |
-|---|---|---|
-| full AI | 0.70 | 33.8 |
-| random decisions instead of utility scores | 0.57 | 34.1 |
-| no cover | 0.90 | 29.8 |
-| no attack tokens | 0.89 | 33.6 |
-
-Utility scoring makes enemies more dangerous than random choices. Cover makes them survive longer
-(rooms last longer) at the cost of some damage. Attack tokens make fights fairer. Full
-design and numbers: **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**.
+Full results, including the honest ones (flanking and target choice made no measurable
+difference against this bot), are in **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**.
 
 ## Tests and tools
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest              # 33 tests: geometry, rooms, senses, every enemy, the boss, the game loop
-python -m tools.autoplay      # skilled and average bots play 20 runs each
-python -m tools.ablation      # switch AI features off one at a time
+python -m pytest               # 47 tests
+python -m tools.autoplay       # skilled and average bots play 20 full runs each
+python -m tools.ablation       # switch AI features off one at a time (parallel, with confidence intervals)
 ```
 
 ## Screens
 
 | | |
 |---|---|
-| ![Title: a live AI demo plays behind it](docs/images/title.png) | ![A lockdown: the second wave warps in](docs/images/lockdown.png) |
-| ![The Warden winds up a ring attack](docs/images/boss.png) | ![Upgrades between floors](docs/images/upgrade.png) |
-| ![Escaped](docs/images/escaped.png) | ![Terminated](docs/images/terminated.png) |
+| ![Title: a live AI demo plays behind it](docs/images/title.png) | ![The story, in three cards](docs/images/story.png) |
+| ![ARGUS speaks as you enter a room](docs/images/argus.png) | ![A rewritten Mender (cyan) heals Seven](docs/images/rewritten.png) |
+| ![ARGUS, the eye, winds up an attack](docs/images/boss.png) | ![A lockdown: the second wave warps in](docs/images/lockdown.png) |
+| ![AI View with a flank heat map](docs/images/ai-view.png) | ![Upgrades between floors](docs/images/upgrade.png) |
+| ![Escaped](docs/images/escaped.png) | ![Recalled](docs/images/recalled.png) |
 
-*Earlier versions of this project (the Clever Hans games) are kept as git tags: `v0.2-detective`,
-`v0.3-stealth` and `v0.4.2-hans`.*
+*Earlier versions of this coursework (LOCKDOWN, and the Clever Hans games) are kept in git
+history and as tags: `v0.2-detective`, `v0.3-stealth`, `v0.4.2-hans`, `v1.0-lockdown`.*

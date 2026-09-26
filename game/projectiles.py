@@ -12,7 +12,7 @@ class Bullet:
     vel: Point
     radius: float
     damage: float
-    hostile: bool                    # True: an enemy's bullet (hurts the player)
+    side: str                        # "argus" (hurts Seven's side) or "seven" (hurts ARGUS's)
     owner: object = None
     pierce: int = 0
     bounce: int = 0
@@ -20,6 +20,10 @@ class Bullet:
     heavy: bool = False              # sniper round: drawn as a streak
     hit: set = field(default_factory=set)
     dead: bool = False
+
+    @property
+    def hostile(self) -> bool:
+        return self.side == "argus"
 
     @property
     def angle(self) -> float:

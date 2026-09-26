@@ -1,4 +1,7 @@
-"""THE WARDEN: the facility's security core, waiting at the end of floor 3.
+"""ARGUS: the mind of the facility, met in person at the end of floor 3 (its body is "the warden").
+
+Named after the hundred-eyed watchman of Greek myth: every camera and sensor in ARGUS DEEP is
+one of its eyes. It is the one unit Seven can never rewrite.
 
 Three PHASES by health (100-66%, 66-33%, 33-0%). Each phase change: a shockwave, a moment of
 invulnerability, reinforcements, and new attacks. Between attacks it decides with utility
@@ -30,12 +33,13 @@ CHARGE_SPEED = 13.0
 
 class Warden(Enemy):
     kind = "warden"
-    name = "THE WARDEN"
+    name = "ARGUS"
     base_hp = 95.0
     speed = 1.8
     radius = 0.9
     worth = 2500
     view_range = 40.0
+    hackable = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -68,10 +72,10 @@ class Warden(Enemy):
     def perceive(self, dt):
         self.senses.update(self, dt)             # it's always alert; it just needs to see you
 
-    def take_hit(self, damage, direction, source):
+    def take_hit(self, damage, direction, source, attacker=None):
         if self.shield > 0:
             return 0.0
-        dealt = super().take_hit(damage, (direction[0] * 0.1, direction[1] * 0.1), source)
+        dealt = super().take_hit(damage, (direction[0] * 0.1, direction[1] * 0.1), source, attacker)
         phase = 1 if self.health > 0.66 else 2 if self.health > 0.33 else 3
         if phase != self.phase and not self.dead:
             self.phase = phase
@@ -90,7 +94,7 @@ class Warden(Enemy):
 
     def options(self):
         sees = self.senses.sees
-        d = distance(self.pos, self.player.pos)
+        d = distance(self.pos, self.foe.pos)
         r = self.ready
         cap = self.minion_cap
         o = {"summon": 0.85 * (1 - self.minions() / cap) if r["summon"] <= 0 and self.minions() < cap else 0.0,
@@ -120,7 +124,7 @@ class Engage(State):
 
     def update(self, w, dt):
         w.brake(dt)
-        w.face_player(dt, 3.0)
+        w.face_foe(dt, 3.0)
         w.think -= dt
         if w.think <= 0 and w.shield <= 0:
             w.decide()
@@ -133,14 +137,14 @@ class Drift(State):
     def enter(self, w):
         w.timer = 0.0
         mid = (w.room.grid.cols / 2, w.room.grid.rows / 2)
-        away, _ = normalize((mid[0] - w.player.pos[0], mid[1] - w.player.pos[1]))
+        away, _ = normalize((mid[0] - w.foe.pos[0], mid[1] - w.foe.pos[1]))
         w.spot = (mid[0] + away[0] * 2.5, mid[1] + away[1] * 2.5)
         w.go_to(w.spot)
 
     def update(self, w, dt):
         w.timer += dt
         w.follow(dt, w.speed * (1 + 0.25 * (w.phase - 1)), face=False)
-        w.face_player(dt, 3.0)
+        w.face_foe(dt, 3.0)
         if w.timer > 1.0:
             w.fsm.change(ENGAGE)
 
@@ -152,7 +156,7 @@ class Windup(State):
         w.path = []
         w.windup = 0.0
         w.locked = False
-        w.aim = angle_to(w.pos, w.player.pos)
+        w.aim = angle_to(w.pos, w.foe.pos)
         w.sweep_dir = 1 if angle_diff(w.facing, w.aim) >= 0 else -1
         w.room.sound({"sweep": "laser", "charge": "growl", "summon": "alarm"}.get(w.attack, "charge"))
 
@@ -161,7 +165,7 @@ class Windup(State):
         total = WINDUPS[w.attack] * (0.85 if w.phase == 3 else 1.0)
         w.windup = min(1.0, w.windup + dt / total)
         if not w.locked:
-            w.aim = angle_to(w.pos, w.player.pos)
+            w.aim = angle_to(w.pos, w.foe.pos)
             w.facing = w.aim
             if w.windup >= 1 - C.LOCK_TIME / total:
                 w.locked = True
@@ -206,7 +210,7 @@ class Sweep(State):
     def enter(self, w):
         w.timer = 0.0
         w.windup = 0.0
-        w.hit_this_sweep = False
+        w.hit_this_sweep = set()
 
     def update(self, w, dt):
         w.timer += dt
@@ -215,10 +219,11 @@ class Sweep(State):
         w.aim = w.sweep_from + w.sweep_dir * SWEEP_ARC * t
         w.facing = w.aim
         w.beam_len = w.room.grid.raycast(w.pos, w.aim, 40)
-        p = w.player
-        if not w.hit_this_sweep and _on_beam(w.pos, w.aim, w.beam_len, p.pos, p.radius + 0.15):
-            if w.room.hurt_player(w, 1):
-                w.hit_this_sweep = True
+        for target in w.hostiles():
+            if id(target) not in w.hit_this_sweep and _on_beam(w.pos, w.aim, w.beam_len, target.pos,
+                                                            target.radius + 0.15):
+                w.hit_this_sweep.add(id(target))
+                w.room.strike(w, target, 1)
         if t >= 1:
             w.beam_len = 0.0
             w.fsm.change(PAUSE)
@@ -249,9 +254,9 @@ class Charge(State):
         moved = distance(before, w.pos)
         w.travelled += moved
         w.room.trail(w)
-        p = w.player
-        if distance(w.pos, p.pos) < w.radius + p.radius + 0.1:
-            w.room.hurt_player(w, 1)
+        for target in w.hostiles():
+            if distance(w.pos, target.pos) < w.radius + target.radius + 0.1:
+                w.room.strike(w, target, 1)
         if moved < step * 0.5 or w.travelled > 20:
             w.room.slam(w)
             w.exposed = True
@@ -270,7 +275,7 @@ class Pause(State):
     def update(self, w, dt):
         w.timer += dt
         w.brake(dt)
-        w.face_player(dt, 3.0)
+        w.face_foe(dt, 3.0)
         if w.timer > (0.9 if w.phase == 1 else 0.7 if w.phase == 2 else 0.45):
             w.fsm.change(ENGAGE)
 

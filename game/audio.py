@@ -114,8 +114,22 @@ class Audio:
             "start": [self._sound(z(0.45, 200, 1200, square=0.3, curve=0.7), 0.25)],
             "win": [self._sound(win, 0.4)],
             "lose": [self._sound(z(1.2, 400, 60, square=0.7, noise=0.2, rng=rng, curve=0.8), 0.5)],
+            "sync_in": [self._sound(z(0.35, 900, 140, square=0.2, curve=0.6), 0.25)],
+            "sync_out": [self._sound(z(0.25, 140, 700, square=0.2, curve=0.6), 0.2)],
+            "hack": [self._sound(self._glitch(rng), 0.4)],
+            "denied": [self._sound(z(0.08, 220, 220, 0.9) + self._silence(0.04) + z(0.1, 180, 180, 0.9), 0.25)],
+            "charge": [self._sound(self._bell(0.4, [(1760, 1.0, 0.15), (2640, 0.5, 0.1)]), 0.3)],
         }
         self.music = self._sound(self._pulse(rng), 0.28)
+
+    def _glitch(self, rng) -> list[float]:
+        """The rewrite: a stuttering, rising digital chirp."""
+        out = []
+        for k in range(8):
+            f = 300 + 180 * k + rng.uniform(-60, 60)
+            out += self._zap(0.035, f, f * 1.6, square=0.8)
+            out += self._silence(0.01 if k % 3 else 0.02)
+        return out + self._zap(0.25, 900, 1800, square=0.4, curve=0.5)
 
     def _pulse(self, rng) -> list[float]:
         """An 8 s loop: a low bass pulse on every beat and a quiet tick off the beat (120 bpm)."""

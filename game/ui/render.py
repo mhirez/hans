@@ -119,7 +119,7 @@ class Renderer:
             return
         x, y = px(e.pos)
         x, y = x + off[0], y + off[1]
-        colour = COLOURS[e.kind]
+        colour = room.colour(e)
         k = e.windup
         live = S.WHITE if e.locked else colour
         alpha = 230 if e.locked else int(70 + 150 * k)
@@ -128,7 +128,7 @@ class Renderer:
         kind = e.kind
         if kind == "grunt" and e.state == "AIM":
             for i in (-1, 0, 1):
-                a = e.aim + i * FAN
+                a = e.aim + i * getattr(e, "fan", FAN)
                 d = min(14.0, grid.raycast(e.pos, a, 14.0))
                 end = (x + math.cos(a) * d * TILE, y + math.sin(a) * d * TILE)
                 pygame.draw.line(overlay, (*live, alpha if i == 0 else alpha // 2), (x, y), end, width if i == 0 else 1)
@@ -205,7 +205,7 @@ class Renderer:
         if e.state == "WINDUP" and e.kind == "charger" and not e.locked:
             x += math.sin(t * 90) * 2
         x, y = x + off[0], y + off[1]
-        colour = COLOURS[e.kind]
+        colour = e.room.colour(e)
         r = e.radius * TILE * (1.18 if e.kind != "warden" else 1.0) * (0.82 if e.crouch else 1.0)
         S.add_glow(surface, (x, y), int(r * 2.4), S.scale(colour, 0.32 if e.alert else 0.18))
         fill = S.WHITE if e.flash > 0 else S.scale(colour, 0.22)
@@ -251,6 +251,15 @@ class Renderer:
             for i in range(3):
                 b = t * 6 + i * 2 * math.pi / 3
                 pygame.draw.circle(surface, S.WHITE, (int(x + math.cos(b) * r), int(y - r * 1.3 + math.sin(b) * r * 0.35)), 3)
+        if e.firewall > 0:                                   # ARGUS's firewall: shoot it off first
+            ring = S.polygon((x, y), r * 1.75, 6, t * 0.8)
+            pygame.draw.polygon(surface, S.scale((170, 210, 255), 0.7 + 0.3 * math.sin(t * 6)), ring, 2)
+        if e.side == "seven":                                # rewritten: how long it's yours for
+            left = max(0.0, e.turned_until - e.room.time) / e.room.player.stats.rewrite_time
+            rect = pygame.Rect(0, 0, int(r * 3.2), int(r * 3.2))
+            rect.center = (int(x), int(y))
+            pygame.draw.arc(surface, S.PLAYER, rect, math.pi / 2, math.pi / 2 + 2 * math.pi * left, 2)
+            S.text(surface, "7", S.display(14), S.WHITE, (x + r * 1.2, y - r * 1.2), "center")
         if e.hp < e.max_hp and e.kind != "warden":
             w = int(r * 2.2)
             bar = pygame.Rect(int(x - w / 2), int(y + r + 7), w, 4)
@@ -263,11 +272,19 @@ class Renderer:
         outer = S.polygon(pos, r * 1.15, 8, w.spin * 0.3)
         pygame.draw.polygon(surface, fill, outer)
         pygame.draw.polygon(surface, edge, outer, 3)
-        inner = S.polygon(pos, r * 0.75, 6, -w.spin)
-        pygame.draw.polygon(surface, S.scale(core, 0.35), inner)
+        inner = S.polygon(pos, r * 0.78, 6, -w.spin)
+        pygame.draw.polygon(surface, S.scale(core, 0.25), inner)
         pygame.draw.polygon(surface, core, inner, 2)
-        S.add_glow(surface, pos, int(r * 1.3), S.scale(core, 0.8 + 0.2 * math.sin(t * 8)))
-        pygame.draw.circle(surface, S.WHITE, (int(x + math.cos(w.facing) * r * 0.35), int(y + math.sin(w.facing) * r * 0.35)), 6)
+        S.add_glow(surface, pos, int(r * 1.3), S.scale(core, 0.6 + 0.2 * math.sin(t * 8)))
+        blink = 1.0 if (t * 0.7) % 4 > 0.12 else 0.15                  # the eye: it looks at you
+        eye = pygame.Rect(0, 0, int(r * 1.15), max(2, int(r * 0.62 * blink)))
+        eye.center = (int(x), int(y))
+        pygame.draw.ellipse(surface, (235, 235, 225), eye)
+        pupil = (int(x + math.cos(w.facing) * r * 0.22), int(y + math.sin(w.facing) * r * 0.12))
+        if blink > 0.5:
+            pygame.draw.circle(surface, core, pupil, int(r * 0.24))
+            pygame.draw.circle(surface, (10, 10, 14), pupil, int(r * 0.12))
+        pygame.draw.ellipse(surface, core, eye, 2)
         if w.shield > 0:
             pygame.draw.circle(surface, S.scale(S.PLAYER, 0.6 + 0.4 * math.sin(t * 20)), (int(x), int(y)), int(r * 1.5), 2)
 
@@ -309,13 +326,13 @@ class Renderer:
             x, y = x + off[0], y + off[1]
             speed = math.hypot(*b.vel) or 1
             dx, dy = b.vel[0] / speed, b.vel[1] / speed
-            if not b.hostile:
+            if b.owner is room.player:
                 tail = (x - dx * 14, y - dy * 14)
                 S.add_glow(surface, (x, y), 12, S.scale(S.PLAYER, 0.6))
                 pygame.draw.line(surface, S.PLAYER, tail, (x, y), 4)
                 pygame.draw.line(surface, S.WHITE, (x - dx * 7, y - dy * 7), (x, y), 2)
                 continue
-            colour = COLOURS.get(getattr(b.owner, "kind", ""), S.DANGER)
+            colour = S.PLAYER if b.side == "seven" else COLOURS.get(getattr(b.owner, "kind", ""), S.DANGER)
             if b.heavy:
                 tail = (x - dx * 34, y - dy * 34)
                 S.add_glow(surface, (x, y), 18, colour)

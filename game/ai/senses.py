@@ -1,4 +1,6 @@
-"""What an enemy knows about the player: only what it has seen or heard (imperfect information).
+"""What an enemy knows about its foe: only what it has seen or heard (imperfect information).
+
+(Its foe is normally the player, Seven. It can be a rewritten traitor.)
 
 SIGHT    a cone (100 degrees while calm, 220 once alert) that needs a clear line of sight;
          anything within 1.6 tiles is felt regardless.
@@ -33,9 +35,18 @@ class Senses:
         self.last_known = pos
         self.heard_at = now
 
+    def switch(self, e, foe):
+        """A new foe: what do I know about it?"""
+        if e.room.grid.line_of_sight(e.pos, foe.pos):
+            self.last_known = foe.pos
+            self.seen_at = e.room.time
+        else:
+            self.last_known = foe.pos
+            self.heard_at = e.room.time - 2.0
+
     def update(self, e, dt: float) -> str | None:
         room = e.room
-        p = room.player
+        p = e.foe or room.player
         d = distance(e.pos, p.pos)
         half = C.ALERT_HALF_ANGLE if e.alert else C.VIEW_HALF_ANGLE
         reach = e.view_range * (1.2 if e.alert else 1.0)

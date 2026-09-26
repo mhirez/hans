@@ -8,6 +8,8 @@ Combat states:
     FLEE      you're within 4 tiles: it runs for the spot furthest from you
     TAG ALONG nothing to do: it stays near the squad, away from you
 
+A rewritten Mender heals SEVEN's side, including Seven.
+
 Utility:  flee     you're within 4 tiles:               1.0
           heal     the most-hurt ally:                   0.35 + 0.65 x (1 - its health)
           shelter  you can see it and it has allies:     0.45
@@ -29,6 +31,7 @@ class Medic(Enemy):
     speed = 3.6
     radius = 0.32
     worth = 150
+    needs_foe = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -43,14 +46,21 @@ class Medic(Enemy):
         return {"heal": (HEAL,), "shelter": (SHELTER,), "flee": (FLEE,), "tag": (TAG,)}[action]
 
     def allies(self):
-        return [e for e in self.room.enemies if e is not self and not e.dead]
+        """Its own side (for a rewritten medic, that includes Seven)."""
+        out = [e for e in self.room.enemies if e is not self and not e.dead and e.side == self.side]
+        if self.turned and self.player.hp > 0:
+            out.append(self.player)
+        return out
+
+    def threat(self):
+        return self.foe.pos if self.foe is not None else self.pos
 
     def options(self):
-        d = distance(self.pos, self.player.pos)
+        d = distance(self.pos, self.foe.pos) if self.foe is not None else 99.0
         allies = self.allies()
         hurt = [e for e in allies if e.health < 0.95]
         self.patient = min(hurt, key=lambda e: (e.health, distance(e.pos, self.pos))) if hurt else None
-        exposed = self.room.grid.line_of_sight(self.pos, self.player.pos)
+        exposed = self.foe is not None and self.room.grid.line_of_sight(self.pos, self.foe.pos)
         return {"flee": 1.0 if d < 4.0 else 0.0,
                 "heal": 0.35 + 0.65 * (1 - self.patient.health) if self.patient else 0.0,
                 "shelter": 0.45 if exposed and allies else 0.0,
@@ -58,7 +68,7 @@ class Medic(Enemy):
 
     def feasible(self, action):
         if action == "flee":
-            self.spot_tile = self.room.tactics.escape_spot(self, self.player.pos)
+            self.spot_tile = self.room.tactics.escape_spot(self, self.threat())
             return self.spot_tile is not None
         return True
 
@@ -67,7 +77,8 @@ class Medic(Enemy):
         if not allies:
             return self.pos
         ally = min(allies, key=lambda e: distance(e.pos, self.pos))
-        away, _ = normalize((ally.pos[0] - self.player.pos[0], ally.pos[1] - self.player.pos[1]))
+        threat = self.threat()
+        away, _ = normalize((ally.pos[0] - threat[0], ally.pos[1] - threat[1]))
         return add(ally.pos, away, 1.4)
 
     def squad_point(self):
@@ -76,7 +87,8 @@ class Medic(Enemy):
             return self.pos
         cx = sum(e.pos[0] for e in allies) / len(allies)
         cy = sum(e.pos[1] for e in allies) / len(allies)
-        away, _ = normalize((cx - self.player.pos[0], cy - self.player.pos[1]))
+        threat = self.threat()
+        away, _ = normalize((cx - threat[0], cy - threat[1]))
         return add((cx, cy), away, 2.0)
 
 
@@ -89,7 +101,7 @@ class Engage(State):
 
     def update(self, m, dt):
         m.brake(dt)
-        m.face_player(dt)
+        m.face_foe(dt)
         m.rethink(dt)
 
 
@@ -105,7 +117,7 @@ class Heal(State):
 
     def update(self, m, dt):
         p = m.patient
-        if p is None or p.dead or p.hp >= p.max_hp:
+        if p is None or p.dead or p.health >= 1:
             m.action = ""
             m.think = 0.0
             m.rethink(dt)
@@ -116,8 +128,7 @@ class Heal(State):
             m.brake(dt)
             m.face(angle_to(m.pos, p.pos), dt)
             m.beam = p
-            p.hp = min(p.max_hp, p.hp + HEAL_RATE * dt)
-            m.room.heal_sparkle(p)
+            m.room.heal(p, HEAL_RATE * dt)
         else:
             m.beam = None
             m.timer -= dt
@@ -142,7 +153,7 @@ class Shelter(State):
             m.spot = m.shelter_point()
             m.go_to(m.spot)
         m.follow(dt, m.speed, face=False)
-        m.face_player(dt)
+        m.face_foe(dt)
         m.rethink(dt)
 
 
@@ -179,7 +190,7 @@ class Tag(State):
             m.spot = m.squad_point()
             m.go_to(m.spot)
         m.follow(dt, m.speed * 0.8, face=False)
-        m.face_player(dt)
+        m.face_foe(dt)
         m.rethink(dt)
 
 

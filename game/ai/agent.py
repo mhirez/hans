@@ -12,7 +12,13 @@ Every enemy runs a finite state machine. The calm half is shared:
 In combat each type DECIDES what to do with utility scores: every option gets a score from
 0 to ~1 built from what it knows (can it see you, how far, how hurt, is it under fire, is an
 attack token free...). The best feasible option wins, with a bonus for the current one so it
-doesn't dither. Scores are kept on the enemy so the AI X-Ray can show them.
+doesn't dither. Scores are kept on the enemy so the AI View can show them.
+
+SIDES. Every unit belongs to ARGUS until Seven rewrites it; then it fights for Seven with
+exactly the same brain. So an enemy never assumes its target is the player: before deciding,
+it CHOOSES A FOE among the hostiles it can see (utility again: close, visible, a traitor,
+the one that just shot me, badly hurt...), and everything else (aim, cover, flank, heal) is
+worked out relative to that foe.
 """
 
 import math
@@ -36,6 +42,8 @@ class Enemy:
     radius = 0.35
     worth = 100
     view_range = C.VIEW_RANGE
+    hackable = True
+    needs_foe = True                      # a medic can still work with nobody to fight
 
     def __init__(self, room, pos: Point, patrol: list[Point], uid: int):
         self.room = room
@@ -71,6 +79,13 @@ class Enemy:
         self.crouch = False
         self.spot: Point | None = None    # where it's heading on purpose (drawn in X-Ray)
         self.age = 0.0
+        self.side = "argus"
+        self.foe = room.player            # who it's fighting (the player, or a traitor)
+        self.foe_scores: dict[str, float] = {}
+        self.last_attacker = None
+        self.turned_until = 0.0           # rewritten by Seven until this time
+        self.firewall = 0.0               # shield that blocks rewriting (ARGUS's countermeasure)
+        self.predicts = False             # leads its shots (ARGUS's countermeasure)
         self.fsm = StateMachine(self, PATROL)
 
     # --- facts ---------------------------------------------------------------------------
@@ -89,6 +104,10 @@ class Enemy:
     @property
     def player(self):
         return self.room.player
+
+    @property
+    def turned(self) -> bool:
+        return self.side == "seven"
 
     def under_fire(self) -> float:
         """1 just after being shot at, fading to 0 over 1.5 s."""
@@ -112,12 +131,14 @@ class Enemy:
             decay = math.exp(-10 * dt)
             self.knock = (self.knock[0] * decay, self.knock[1] * decay)
         self.perceive(dt)
+        if self.foe is None and self.needs_foe and self.fsm.current not in (ESCORT, STUNNED):
+            self.fsm.change(ESCORT)                     # nobody left to fight: stay with Seven
         self.fsm.update(dt)
 
     def perceive(self, dt: float):
         event = self.senses.update(self, dt)
         if event == "spotted":
-            self.become_alert(self.player.pos, shout=True)
+            self.become_alert(self.foe.pos, shout=True)
         elif self.alert and self.senses.sees and self.fsm.current is SEARCH:
             self.say("!")
             self.fsm.change(self.combat_state())
@@ -147,18 +168,25 @@ class Enemy:
         if self.fsm.current in (PATROL, INVESTIGATE):
             self.fsm.change(INVESTIGATE)
 
-    def take_hit(self, damage: float, direction: Point, source: Point) -> float:
+    def take_hit(self, damage: float, direction: Point, source: Point, attacker=None) -> float:
         if self.dead:
+            return 0.0
+        if self.firewall > 0:                          # the firewall soaks it up first
+            self.firewall = max(0.0, self.firewall - damage)
+            self.flash = 0.05
+            if self.firewall <= 0:
+                self.room.firewall_down(self)
             return 0.0
         if self.exposed:
             damage *= 2
         self.hp -= damage
         self.flash = 0.09
         self.hit_time = self.now
+        self.last_attacker = attacker
         self.knock = add(self.knock, direction, 2.2)
         if not self.alert:
             self.become_alert(source, shout=True)
-        elif not self.senses.sees:
+        elif not self.senses.sees and attacker is self.foe:
             self.senses.heard(source, self.now)
         if self.hp <= 0:
             self.room.kill(self)
@@ -177,10 +205,52 @@ class Enemy:
         """Last-moment check (e.g. is there actually a cover spot?). May prepare the action."""
         return True
 
+    def hostiles(self) -> list:
+        return self.room.hostiles_of(self)
+
+    def choose_foe(self):
+        """Target selection: who is the biggest threat right now? (utility, with hysteresis)"""
+        grid = self.room.grid
+        scores = {}
+        best, best_score = None, -math.inf
+        for h in self.hostiles():
+            d = distance(self.pos, h.pos)
+            seen = d <= self.view_range * 1.2 and grid.line_of_sight(self.pos, h.pos)
+            if not seen and h is not self.foe:
+                continue
+            s = 1.0 / (1 + d / 6)
+            if h is self.player:
+                s += 0.25
+            elif h.side == "seven":
+                s += 0.45                               # a traitor in the ranks: deal with it first
+            if h is self.last_attacker and self.now - self.hit_time < 3:
+                s += 0.5
+            s += 0.2 * (1 - h.health)
+            if h is self.foe:
+                s += 0.2
+            if not seen:
+                s -= 0.4
+            scores[getattr(h, "name", "SEVEN") if h is not self.player else "SEVEN"] = s
+            if s > best_score:
+                best, best_score = h, s
+        self.foe_scores = scores
+        if best is not self.foe:
+            self.foe = best
+            if best is not None:
+                self.senses.switch(self, best)
+                if best is not self.player:
+                    self.say("!")
+
     def decide(self):
         """Score every option, keep the best feasible one (with a bonus for the current)."""
         self.think = THINK_EVERY
-        if self.senses.age(self.now) > C.MEMORY_TIME and not self.senses.sees:
+        self.choose_foe()
+        if self.foe is None and self.needs_foe:        # a rewritten unit with nobody to fight
+            if self.fsm.current is not ESCORT:
+                self.action = ""
+                self.fsm.change(ESCORT)
+            return
+        if self.foe is not None and self.senses.age(self.now) > C.MEMORY_TIME and not self.senses.sees:
             self.fsm.change(SEARCH)
             return
         scores = self.options()
@@ -250,14 +320,24 @@ class Enemy:
     def face(self, angle: float, dt: float, rate: float = C.TURN_RATE):
         self.facing = turn_toward(self.facing, angle, rate * dt)
 
-    def face_player(self, dt: float, rate: float = C.TURN_RATE):
-        target = self.player.pos if self.senses.sees else self.senses.last_known
+    def face_foe(self, dt: float, rate: float = C.TURN_RATE):
+        target = self.foe.pos if (self.foe is not None and self.senses.sees) else self.senses.last_known
         if target is not None:
             self.face(angle_to(self.pos, target), dt, rate)
 
     def target(self) -> Point:
-        """Where it thinks the player is."""
-        return self.player.pos if self.senses.sees else (self.senses.last_known or self.player.pos)
+        """Where it thinks its foe is."""
+        foe = self.foe or self.player
+        return foe.pos if self.senses.sees else (self.senses.last_known or foe.pos)
+
+    def lead(self, speed: float) -> Point:
+        """Where to aim: at the foe, or (if ARGUS taught it to) where the foe is going to be."""
+        foe = self.foe or self.player
+        if not self.predicts or not self.senses.sees:
+            return self.target()
+        t = distance(self.pos, foe.pos) / max(1.0, speed)
+        vx, vy = getattr(foe, "vel", (0.0, 0.0))
+        return foe.pos[0] + vx * t * 0.7, foe.pos[1] + vy * t * 0.7
 
 
 # --- calm states ------------------------------------------------------------------------------
@@ -341,6 +421,27 @@ class Search(State):
                     e.spot = center(t)
 
 
+class Escort(State):
+    """A rewritten unit with no enemy in sight: stays close to Seven, looking for one."""
+    name = "ESCORT"
+
+    def enter(self, e):
+        e.timer = 0.0
+        e.windup = 0.0
+        e.think = 0.3
+
+    def update(self, e, dt):
+        e.timer -= dt
+        if e.timer <= 0:
+            e.timer = 0.4
+            e.go_to(e.player.pos)
+        if distance(e.pos, e.player.pos) > 2.0:
+            e.follow(dt, e.speed)
+        else:
+            e.brake(dt)
+        e.rethink(dt)
+
+
 class Stunned(State):
     name = "STUNNED"
 
@@ -358,7 +459,7 @@ class Stunned(State):
             e.fsm.change(e.combat_state())
 
 
-PATROL, INVESTIGATE, SEARCH, STUNNED = Patrol(), Investigate(), Search(), Stunned()
+PATROL, INVESTIGATE, SEARCH, STUNNED, ESCORT = Patrol(), Investigate(), Search(), Stunned(), Escort()
 CALM = (PATROL, INVESTIGATE)
 
 

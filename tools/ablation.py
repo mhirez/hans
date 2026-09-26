@@ -1,49 +1,62 @@
 """Does each piece of the AI matter? Switch one off at a time and measure.
 
-The AVERAGE bot plays the first two floors (8 rooms) under each condition. Reported per room:
-hits the enemies land on the player, and how long the room takes to clear. More hits = the
-enemies are more dangerous.
+An AVERAGE bot plays the first two floors (8 rooms) under each condition, many times, in
+parallel. Reported: hits the enemies land on the player per room (with a 95% confidence
+interval), seconds per room, rooms cleared. More hits = more dangerous enemies.
 
+1. ARGUS's side (the bot never rewrites, so only the enemy AI is being measured)
     full          everything on
     random        decisions picked at random among the options that are possible, instead of by
                   utility score (is the scoring actually making them smarter?)
-    no cover      grunts never take cover
-    no flank      grunts never flank
+    no cover      Sentries never take cover
+    no flank      Sentries never flank
     no tokens     no attack tokens: everyone attacks whenever it likes
+    no director   ARGUS never adapts the rooms to how you play
+2. Seven's side (the bot rewrites)
+    rewrites          everything on
+    no target choice  ARGUS's units always target Seven and ignore rewritten traitors
+3. Does the director recognise play styles? Which countermeasures it deploys against a bot that
+   strafes a lot (average), one that always fights from 9-12 tiles (far), and one that
+   rewrites (rewriter).
 
-    python -m tools.ablation           12 runs per condition
+    python -m tools.ablation           40 runs per condition
+    python -m tools.ablation 100       100 runs per condition
 """
 
+import collections
 import contextlib
+import math
+import multiprocessing
 import random
-import statistics
 import sys
 
-from game.ai import agent, grunt, tactics
+from game.ai import agent, director, grunt, tactics
 from game.bot import make_bot
 from game.run import Run
 
 AVERAGE = make_bot(reaction=0.8, dodge=1.5, wobble=1.0, dash_bullets=False)
+NO_REWRITES = make_bot(reaction=0.8, dodge=1.5, wobble=1.0, dash_bullets=False, rewrites=False)
+FAR = make_bot(reaction=0.8, dodge=1.5, wobble=1.0, dash_bullets=False, rewrites=False, band=(9.0, 12.0))
+BOTS = {"average": NO_REWRITES, "far": FAR, "rewriter": AVERAGE}
 
 
-def run_two_floors(seed: int) -> tuple[int, float, int]:
+def run_two_floors(seed: int, player) -> tuple[int, float, int, list[str]]:
+    """(hits taken, seconds played, rooms cleared, countermeasures deployed) over floors 1-2."""
     run = Run(seed)
-    hits, rooms, t = 0, 0, 0.0
-    while run.state in ("room", "upgrade") and run.floor <= 2 and t < 600:
+    seen, t, deployed = [], 0.0, []
+    while run.state in ("room", "upgrade") and run.floor <= 2 and t < 900:
         if run.state == "upgrade":
             run.choose(0)
             continue
+        if not seen or seen[-1] is not run.room:
+            seen.append(run.room)
+            deployed += run.director.deployed
         room = run.room
-        run.update(1 / 60, *AVERAGE(run))
+        run.update(1 / 60, *player(run))
         room.sounds.clear()
         room.fx.clear()
         t += 1 / 60
-        if run.room is not room:
-            hits += room.damage_taken
-            rooms += 1
-    if run.state == "dead":
-        hits += run.room.damage_taken
-    return hits, t, rooms
+    return sum(r.damage_taken for r in seen), t, min(8, run.rooms_cleared), deployed
 
 
 @contextlib.contextmanager
@@ -62,6 +75,10 @@ def patched(condition: str):
             if self.kind == "warden":
                 return original(self)
             self.think = agent.THINK_EVERY
+            self.choose_foe()
+            if self.foe is None and self.needs_foe:
+                self.fsm.change(agent.ESCORT)
+                return
             options = [a for a, s in self.options().items() if s > 0]
             rng.shuffle(options)
             for action in options:
@@ -81,6 +98,20 @@ def patched(condition: str):
         patch(grunt.Grunt, "options", options)
     elif condition == "no tokens":
         patch(tactics.Coordinator, "can_attack", lambda self, e, now: True)
+    elif condition == "no director":
+        def adapt(self, plan, player, rng):
+            self.scores, self.deployed = {}, []
+            return plan
+        patch(director.Director, "adapt", adapt)
+    elif condition == "no target choice":
+        original_choose = agent.Enemy.choose_foe
+
+        def choose_foe(self):
+            if self.side == "argus":
+                self.foe = self.player
+                return
+            original_choose(self)
+        patch(agent.Enemy, "choose_foe", choose_foe)
     try:
         yield
     finally:
@@ -88,17 +119,61 @@ def patched(condition: str):
             setattr(obj, name, value)
 
 
-def report(runs: int):
-    print("| condition | hits on the player per room | seconds per room | rooms cleared (of 8) |")
+def bot_for(condition: str):
+    if condition in ("rewrites", "no target choice"):
+        return BOTS["rewriter"]
+    if condition.startswith("diag "):
+        return BOTS[condition[5:]]
+    return BOTS["average"]
+
+
+def _one(job):
+    condition, seed = job
+    with patched(condition):
+        return run_two_floors(seed, bot_for(condition))
+
+
+def measure(condition: str, runs: int, pool) -> list:
+    return pool.map(_one, [(condition, s) for s in range(runs)])
+
+
+def table(runs: int, conditions, pool):
+    print("| condition | hits on the player per room (95% CI) | seconds per room | rooms cleared (of 8) |")
     print("|---|---|---|---|")
-    for condition in ("full", "random", "no cover", "no flank", "no tokens"):
-        with patched(condition):
-            results = [run_two_floors(s) for s in range(runs)]
-        rooms = sum(r[2] for r in results)
-        hits = sum(r[0] for r in results) / max(1, rooms + sum(1 for r in results if r[2] < 8))
-        secs = sum(r[1] for r in results) / max(1, rooms)
-        print(f"| {condition} | {hits:.2f} | {secs:.1f} | {statistics.mean(r[2] for r in results):.1f} |")
+    for condition in conditions:
+        results = measure(condition, runs, pool)
+        rates = [r[0] / (r[2] + (1 if r[2] < 8 else 0)) for r in results]        # the room you died in counts
+        mean = sum(rates) / len(rates)
+        sd = math.sqrt(sum((x - mean) ** 2 for x in rates) / max(1, len(rates) - 1))
+        ci = 1.96 * sd / math.sqrt(len(rates))
+        played = sum(r[2] + (1 if r[2] < 8 else 0) for r in results)
+        print(f"| {condition} | {mean:.2f} ± {ci:.2f} | {sum(r[1] for r in results) / max(1, played):.1f} | "
+              f"{sum(r[2] for r in results) / len(results):.1f} |")
+
+
+def director_table(runs: int, pool):
+    print("| player | countermeasures ARGUS deployed (share of all its decisions) |")
+    print("|---|---|")
+    for name in ("average", "far", "rewriter"):
+        counts = collections.Counter()
+        for r in measure(f"diag {name}", runs, pool):
+            counts.update(r[3])
+        total = sum(counts.values()) or 1
+        top = ", ".join(f"{k} {100 * v / total:.0f}%" for k, v in counts.most_common(4))
+        print(f"| {name} | {top} |")
+
+
+def report(runs: int):
+    with multiprocessing.Pool() as pool:
+        print("1. ARGUS'S SIDE (the bot never rewrites)")
+        table(runs, ("full", "random", "no cover", "no flank", "no tokens", "no director"), pool)
+        print()
+        print("2. SEVEN'S SIDE (the bot rewrites)")
+        table(runs, ("rewrites", "no target choice"), pool)
+        print()
+        print("3. WHAT THE DIRECTOR DEPLOYS AGAINST EACH PLAY STYLE")
+        director_table(runs, pool)
 
 
 if __name__ == "__main__":
-    report(int(sys.argv[1]) if len(sys.argv) > 1 else 12)
+    report(int(sys.argv[1]) if len(sys.argv) > 1 else 40)

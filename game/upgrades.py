@@ -36,6 +36,13 @@ class Upgrade:
         elif self.key == "speed":
             s.speed *= 1.15
             s.bullet_speed *= 1.2
+        elif self.key == "deep":
+            s.rewrite_time += 4.0
+        elif self.key == "overload":
+            s.overload *= 1.6
+        elif self.key == "spare":
+            s.max_charges += 1
+            player.charges = min(s.max_charges, player.charges + 1)
 
 
 ALL = [
@@ -49,6 +56,9 @@ ALL = [
     Upgrade("ram", "RAM DASH", "Dashing through enemies hurts them", "=>*", limit=1),
     Upgrade("repair", "NANO-REPAIR", "Heal 1 after every cleared room", "(+)", limit=2),
     Upgrade("speed", "THRUSTERS", "Move 15% faster, faster bullets", "^^", limit=2),
+    Upgrade("deep", "DEEP REWRITE", "Rewritten units stay yours 4 s longer", "{7}", limit=2),
+    Upgrade("overload", "OVERLOAD", "Rewritten units explode harder and wider", "(*)", limit=2),
+    Upgrade("spare", "SPARE CHARGE", "Hold one more rewrite charge (+1 now)", "<>+", limit=1),
 ]
 
 

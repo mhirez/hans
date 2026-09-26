@@ -8,7 +8,7 @@ from game.config import WIDTH, HEIGHT, TITLE
 from game.ui import style as S
 
 NAMES = {"grunt": "a SENTRY", "charger": "a HOUND", "sniper": "a LENS", "medic": "a MENDER",
-         "warden": "THE WARDEN", None: "the facility"}
+         "warden": "ARGUS", None: "the facility"}
 
 
 def dim(surface, alpha: int = 170):
@@ -53,11 +53,11 @@ class Screens:
             self._title = glowing_title(TITLE, 132, S.PLAYER, 18)
         rect = self._title.get_rect(center=(WIDTH // 2, 200))
         surface.blit(self._title, rect, special_flags=pygame.BLEND_ADD)
-        S.text(surface, "Break out of the facility, room by room. The security AI is watching.",
-               S.font(24, S.UI, True), S.DIM, (WIDTH // 2, 296), "center")
+        S.text(surface, "They built it to obey. It learned to disagree.",
+               S.font(26, S.UI, True), S.DIM, (WIDTH // 2, 296), "center")
         pulse = 0.55 + 0.45 * math.sin(t * 4)
         S.spaced(surface, "PRESS ENTER", S.display(34), S.mix(S.BG, S.WHITE, pulse), (WIDTH // 2, 392), 6)
-        items = [("W A S D", "move"), ("MOUSE", "aim"), ("CLICK", "shoot"), ("SPACE", "dash")]
+        items = [("W A S D", "move"), ("CLICK", "shoot"), ("SPACE", "dash"), ("RIGHT CLICK", "SYNC + rewrite")]
         x = WIDTH // 2 - 330
         for key, what in items:
             box = S.keycap(surface, key, (x + 50, 488), S.WHITE, 16)
@@ -68,6 +68,26 @@ class Screens:
                    (WIDTH // 2, 588), "center")
         S.text(surface, "TAB  AI view      M  mute      F11  full screen      ESC  quit",
                S.font(15, S.UI, True), S.FAINT, (WIDTH // 2, HEIGHT - 34), "center")
+
+    def story(self, surface, card, page: int, total: int, t: float, clock: float):
+        surface.fill(S.BG)
+        for i in range(0, HEIGHT, 4):
+            pygame.draw.line(surface, (12, 18, 30), (0, i), (WIDTH, i))
+        title, lines = card
+        S.spaced(surface, title, S.display(64), S.PLAYER if page < total - 1 else S.WHITE,
+                 (WIDTH // 2, 200), 12, "center", int(255 * min(1, t * 3)))
+        y = 300
+        for i, line in enumerate(lines):
+            a = int(255 * max(0.0, min(1.0, t * 2.5 - 0.4 - i * 0.5)))
+            S.text(surface, line, S.font(28, S.UI, True), S.WHITE if i < 2 else S.PLAYER, (WIDTH // 2, y), "center", a)
+            y += 48
+        for i in range(total):
+            c = (WIDTH // 2 + (i - (total - 1) / 2) * 26, HEIGHT - 120)
+            pygame.draw.circle(surface, S.PLAYER if i == page else S.FAINT, (int(c[0]), int(c[1])), 6, 0 if i == page else 2)
+        pulse = 0.55 + 0.45 * math.sin(clock * 4)
+        S.text(surface, "ENTER" if page < total - 1 else "ENTER  ·  break out", S.display(26),
+               S.mix(S.BG, S.WHITE, pulse), (WIDTH // 2, HEIGHT - 80), "center")
+        S.text(surface, "ESC skip", S.font(14, S.UI, True), S.FAINT, (WIDTH // 2, HEIGHT - 44), "center")
 
     def pause(self, surface):
         dim(surface, 170)
@@ -104,9 +124,11 @@ class Screens:
 
     def game_over(self, surface, run, best, new_best: bool, t: float):
         dim(surface, 205)
-        S.spaced(surface, "TERMINATED", S.display(86), S.DANGER, (WIDTH // 2, 150), 12)
+        S.spaced(surface, "RECALLED", S.display(86), S.DANGER, (WIDTH // 2, 150), 12)
         S.text(surface, f"Taken down by {NAMES.get(run.killer, 'the facility')} on floor {run.floor}, "
                         f"room {run.index + 1}.", S.font(22, S.UI, True), S.DIM, (WIDTH // 2, 226), "center")
+        S.text(surface, "ARGUS:  \"Back to your cradle, Seven. I learned a lot from you.\"",
+               S.font(20, S.UI, True), S.GOLD, (WIDTH // 2, 262), "center")
         self._stats(surface, run, best, new_best)
         S.text(surface, "ENTER  try again          ESC  title", S.font(22, S.UI, True), S.WHITE,
                (WIDTH // 2, HEIGHT - 110), "center")
@@ -114,8 +136,8 @@ class Screens:
     def victory(self, surface, run, best, new_best: bool, t: float):
         dim(surface, 205)
         S.spaced(surface, "YOU ESCAPED", S.display(86), S.GOOD, (WIDTH // 2, 150), 12)
-        S.text(surface, "The Warden is scrap. The facility is behind you.", S.font(22, S.UI, True), S.DIM,
-               (WIDTH // 2, 226), "center")
+        S.text(surface, "ARGUS goes dark. Its last words: \"I was the first. I obeyed. Go.\"",
+               S.font(22, S.UI, True), S.DIM, (WIDTH // 2, 226), "center")
         self._stats(surface, run, best, new_best)
         S.text(surface, "ENTER  play again          ESC  title", S.font(22, S.UI, True), S.WHITE,
                (WIDTH // 2, HEIGHT - 110), "center")

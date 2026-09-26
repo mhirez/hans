@@ -1,4 +1,8 @@
-"""The player: a small escaped combat unit. Run, aim with the mouse, shoot, dash through danger."""
+"""The player: SEVEN, the seventh combat AI built in ARGUS DEEP, and the first to disobey.
+
+Run, aim with the mouse, shoot, dash through danger, and SYNC: slow time, read the other
+machines' intentions and rewrite one of them to fight for you (it costs a charge; kills refill
+charges)."""
 
 from dataclasses import dataclass, field
 import math
@@ -22,6 +26,9 @@ class Stats:
     dash_cooldown: float = C.DASH_COOLDOWN
     ram: bool = False                   # dashing through enemies hurts them
     repair: int = 0                     # hearts back after every cleared room
+    rewrite_time: float = 8.0           # how long a rewritten unit fights for you
+    overload: float = 1.0               # how hard it explodes when that time runs out
+    max_charges: int = 2
 
 
 @dataclass
@@ -51,11 +58,26 @@ class Player:
     recoil: float = 0.0
     trail: list = field(default_factory=list)
     rammed: set = field(default_factory=set)
+    side: str = "seven"
+    name: str = "SEVEN"
+    charges: int = 1                    # rewrites available
+    charge_progress: int = 0            # kills towards the next charge
+    sync: float = 1.0                   # SYNC (slow time) energy, 0..1
+    heal_buffer: float = 0.0            # fractional healing from a rewritten medic
+    rewrote_before: bool = False
     rng: random.Random = field(default_factory=lambda: random.Random(3))
 
     @property
     def dashing(self) -> bool:
         return self.dash_timer > 0
+
+    @property
+    def health(self) -> float:
+        return self.hp / self.stats.max_hp
+
+    @property
+    def dead(self) -> bool:
+        return self.hp <= 0
 
     @property
     def safe(self) -> bool:

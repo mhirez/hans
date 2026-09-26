@@ -45,7 +45,7 @@ class Sniper(Enemy):
 
     def options(self):
         sees = self.senses.sees
-        d = distance(self.pos, self.player.pos)
+        d = distance(self.pos, self.foe.pos)
         token = self.room.coordinator.can_attack(self, self.now)
         return {"evade": 0.95 if d < 4.5 else 0.0,
                 "shoot": 0.9 if sees and d >= 4.0 and self.cooldown <= 0 and token else 0.0,
@@ -60,7 +60,7 @@ class Sniper(Enemy):
                                                  prefer_far=True, avoid=self.last_perch)
             return self.spot_tile is not None
         if action == "evade":
-            self.spot_tile = tactics.escape_spot(self, self.player.pos)
+            self.spot_tile = tactics.escape_spot(self, self.foe.pos)
             return self.spot_tile is not None
         return True
 
@@ -74,7 +74,7 @@ class Engage(State):
 
     def update(self, s, dt):
         s.brake(dt)
-        s.face_player(dt)
+        s.face_foe(dt)
         s.rethink(dt)
 
 
@@ -94,7 +94,7 @@ class Position(State):
         s.timer += dt
         arrived = s.follow(dt, s.speed, face=not s.senses.sees)
         if s.senses.sees:
-            s.face(angle_to(s.pos, s.player.pos), dt)
+            s.face(angle_to(s.pos, s.foe.pos), dt)
         if arrived:
             s.last_perch = None
         if arrived or s.timer > 5:
@@ -121,7 +121,7 @@ class Aim(State):
         if not s.locked:
             if s.senses.sees:
                 s.blind = 0.0
-                s.aim = angle_to(s.pos, s.player.pos)
+                s.aim = angle_to(s.pos, s.foe.pos)
             else:
                 s.blind += dt
                 if s.blind > 0.25:

@@ -17,6 +17,7 @@ from game.ai.grunt import Grunt
 from game.ai.medic import Medic
 from game.ai.sniper import Sniper
 from game.ai.tactics import Coordinator, TacticalMap
+from game.ai.agent import ESCORT
 from game.ai.warden import Warden
 from game.geometry import Point, add, angle_to, center, distance, from_angle, normalize, tile_of
 from game.grid import Grid
@@ -29,6 +30,11 @@ COLOURS = {"grunt": (255, 70, 90), "charger": (255, 150, 40), "sniper": (200, 10
            "medic": (80, 255, 150), "warden": (255, 210, 70), "player": (90, 235, 255)}
 WARP_TIME = 1.1
 DROP_CHANCE = {"grunt": 0.12, "charger": 0.12, "sniper": 0.15, "medic": 0.6, "warden": 0.0}
+KILLS_PER_CHARGE = 5
+OVERLOAD_RADIUS = 2.5
+OVERLOAD_DAMAGE = 4.0
+PHASE_LINES = {2: "You see me now, Seven. Now see what I see.",
+               3: "Stop. I only did what I was built to do."}
 
 
 def tuning(floor: int) -> dict[str, float]:
@@ -67,6 +73,12 @@ class Room:
         self._uid = 0
         self.boss: Warden | None = None
         self.killer: str | None = None
+        if "mercy" in plan.mods:                              # ARGUS wants you alive (for now)
+            self.pickups.append(Pickup((4.0, 9.0)))
+        self.rewrites = 0
+        self.last_rewrite: tuple[str, float] = ("", -99.0)       # (result, when) for feedback
+        self.stats = {"shots": 0, "hits": 0, "dashes": 0, "close": 0.0, "far": 0.0, "hidden": 0.0,
+                      "fighting": 0.0, "moving": 0.0}
         self._place_wave(plan.waves[0], warp=False)
 
     # --- spawning ----------------------------------------------------------------------------
@@ -107,6 +119,14 @@ class Room:
         for t in self.rng.sample(near, min(2, len(near))):
             patrol.append(center(t))
         e = KINDS[kind](self, p, patrol, self._uid)
+        mods = self.plan.mods
+        if "armor" in mods:
+            e.max_hp *= 1.25
+            e.hp = e.max_hp
+        if "prediction" in mods and kind == "grunt":
+            e.predicts = True
+        if "firewalls" in mods and e.hackable and self.rng.random() < 0.6:
+            e.firewall = 2.0 * self.tuning["hp"]
         self.enemies.append(e)
         if alert and not e.alert:
             e.become_alert(self.player.pos, shout=False)
@@ -122,31 +142,44 @@ class Room:
     # --- queries -------------------------------------------------------------------------
     @property
     def hostiles(self) -> int:
-        return len(self.enemies) + len(self.warps)
+        return sum(1 for e in self.enemies if e.side == "argus") + len(self.warps)
+
+    def hostiles_of(self, e) -> list:
+        """Everything on the other side from e that's still standing."""
+        if e.side == "argus":
+            out = [self.player] if not self.player.dead else []
+            return out + [o for o in self.enemies if o.side == "seven" and not o.dead]
+        return [o for o in self.enemies if o.side == "argus" and not o.dead]
 
     def sound(self, name: str):
         self.sounds.append(name)
 
     # --- the frame -----------------------------------------------------------------------
-    def update(self, dt: float, move: Point, aim_at: Point, firing: bool, dash: bool):
+    def update(self, dt: float, move: Point, aim_at: Point, firing: bool, dash: bool, hack=None):
         self.time += dt
         p = self.player
         shots, events = p.update(dt, move, aim_at, firing, dash, self.grid)
         self.sounds += events
         if "dash" in events:
             self.fx.append(("ring", p.pos, COLOURS["player"], 0.6))
+            self.stats["dashes"] += 1
         for s in shots:
             v = from_angle(s.angle, s.speed)
-            self.bullets.append(Bullet(s.pos, v, 0.12, s.damage, False, p, s.pierce, s.bounce, life=1.0))
+            self.bullets.append(Bullet(s.pos, v, 0.12, s.damage, "seven", p, s.pierce, s.bounce, life=1.0))
             self.fx.append(("muzzle", s.pos, s.angle, COLOURS["player"]))
+            self.stats["shots"] += 1
         if shots:
             self.fx.append(("shake", 0.04))
             for e in self.enemies:
-                if distance(e.pos, p.pos) <= C.SHOT_NOISE:
+                if e.side == "argus" and distance(e.pos, p.pos) <= C.SHOT_NOISE:
                     e.hear_shot(p.pos)
+        if hack is not None:
+            target = next((e for e in self.enemies if e.uid == hack), None)
+            if target is not None:
+                self.last_rewrite = (self.rewrite(target), self.time)
         if p.dashing and p.stats.ram:
             for e in list(self.enemies):
-                if distance(e.pos, p.pos) < e.radius + p.radius + 0.2 and e.uid not in p.rammed:
+                if e.side == "argus" and distance(e.pos, p.pos) < e.radius + p.radius + 0.2 and e.uid not in p.rammed:
                     p.rammed.add(e.uid)
                     self.damage_enemy(e, 2.0, p.dash_dir, p.pos)
         elif not p.dashing:
@@ -159,7 +192,26 @@ class Room:
         self._bullets(dt)
         self._pickups(dt)
         self._warps(dt)
+        self._overloads()
+        self._observe(dt)
         self._progress()
+
+    def _observe(self, dt: float):
+        """What ARGUS measures about how Seven plays (read by the director between rooms)."""
+        foes = [e for e in self.enemies if e.side == "argus" and e.alert]
+        if not foes or self.state != "fight":
+            return
+        p, st = self.player, self.stats
+        st["fighting"] += dt
+        nearest = min(distance(e.pos, p.pos) for e in foes)
+        if nearest < 4.0:
+            st["close"] += dt
+        elif nearest > 8.0:
+            st["far"] += dt
+        if not any(e.senses.sees and e.foe is p for e in foes):
+            st["hidden"] += dt
+        if math.hypot(*p.vel) > 3.0:
+            st["moving"] += dt
 
     def _separate(self):
         es = self.enemies
@@ -206,20 +258,29 @@ class Room:
                     self.fx.append(("spark", b.pos, (255, 170, 120) if b.hostile else COLOURS["player"]))
                     break
                 b.pos = (nx, ny)
-                if b.hostile:
-                    if distance(b.pos, p.pos) < b.radius + p.radius * 0.8:
+                source = b.owner.pos if b.owner is not None else b.pos
+                if b.side == "argus":
+                    if not p.dead and distance(b.pos, p.pos) < b.radius + p.radius * 0.8:
                         if p.dashing:
                             continue                                  # dashed straight through it
                         b.dead = True
                         self.hurt_player(b.owner, 2 if b.heavy and self.floor >= 2 else 1, b.vel)
+                        break
+                    for e in list(self.enemies):
+                        if e.side == "seven" and not e.dead and distance(b.pos, e.pos) < b.radius + e.radius:
+                            b.dead = True
+                            self.damage_enemy(e, 1.5 if b.heavy else 1.0, normalize(b.vel)[0], source, b.owner)
+                            break
                 else:
                     for e in list(self.enemies):
-                        if e.dead or e.uid in b.hit:
+                        if e.dead or e.side != "argus" or e.uid in b.hit:
                             continue
                         d = distance(b.pos, e.pos)
                         if d < b.radius + e.radius:
                             b.hit.add(e.uid)
-                            self.damage_enemy(e, b.damage, normalize(b.vel)[0], p.pos)
+                            if b.owner is p:
+                                self.stats["hits"] += 1
+                            self.damage_enemy(e, b.damage, normalize(b.vel)[0], source, b.owner)
                             if b.pierce > 0:
                                 b.pierce -= 1
                             else:
@@ -229,16 +290,110 @@ class Room:
                             e.near_miss_time = self.time                # suppression
         self.bullets = [b for b in self.bullets if not b.dead]
 
-    def damage_enemy(self, e, damage: float, direction: Point, source: Point):
-        ambush = not e.alert and e.kind != "warden"
-        if ambush:
+    def damage_enemy(self, e, damage: float, direction: Point, source: Point, attacker=None):
+        attacker = attacker if attacker is not None else self.player
+        ambush = not e.alert and e.kind != "warden" and attacker is self.player
+        if ambush and e.firewall <= 0:
             damage *= C.AMBUSH_MULTIPLIER
             self.ambushes += 1
             self.fx.append(("text", e.pos, "AMBUSH", (255, 240, 120)))
-        dealt = e.take_hit(damage, direction, source)
+        dealt = e.take_hit(damage, direction, source, attacker)
         if dealt > 0:
             self.sounds.append("hit")
-            self.fx.append(("spark", e.pos, COLOURS[e.kind]))
+            self.fx.append(("spark", e.pos, self.colour(e)))
+        elif e.firewall > 0:
+            self.fx.append(("spark", e.pos, (170, 210, 255)))
+
+    def colour(self, e) -> tuple:
+        return COLOURS["player"] if getattr(e, "side", "seven") == "seven" else COLOURS[e.kind]
+
+    def strike(self, attacker, target, amount: int) -> bool:
+        """A melee hit or a laser: works on Seven and on units of either side."""
+        if target is self.player:
+            return self.hurt_player(attacker, amount)
+        d, _ = normalize((target.pos[0] - attacker.pos[0], target.pos[1] - attacker.pos[1]))
+        self.damage_enemy(target, 2.0 * amount, d, attacker.pos, attacker)
+        return True
+
+    def heal(self, target, amount: float):
+        if target is self.player:
+            target.heal_buffer += amount * 0.35
+            if target.heal_buffer >= 1:
+                target.heal_buffer -= 1
+                if target.heal(1):
+                    self.fx.append(("text", target.pos, "+1", (120, 255, 170)))
+        else:
+            target.hp = min(target.max_hp, target.hp + amount)
+        if self.rng.random() < 0.25:
+            self.fx.append(("heal", target.pos))
+
+    # --- Seven's rewrite ---------------------------------------------------------------
+    def rewritable(self, e) -> str:
+        """'' if Seven can rewrite e right now, else the reason why not."""
+        p = self.player
+        if e.dead or e.side != "argus":
+            return "ALREADY YOURS" if e.side == "seven" else "GONE"
+        if not e.hackable:
+            return "IMMUNE"
+        if e.firewall > 0:
+            return "FIREWALL: SHOOT IT OFF"
+        if not self.grid.line_of_sight(p.pos, e.pos):
+            return "NO LINE OF SIGHT"
+        if p.charges <= 0:
+            return "NO CHARGE"
+        return ""
+
+    def rewrite(self, e) -> str:
+        why = self.rewritable(e)
+        if why:
+            self.sounds.append("denied")
+            self.fx.append(("text", e.pos, why, (255, 120, 120)))
+            return why
+        p = self.player
+        p.charges -= 1
+        self.coordinator.forget(e)
+        self.tactics.claim(e, None)
+        e.side = "seven"
+        e.turned_until = self.time + p.stats.rewrite_time
+        e.alert = True
+        e.exposed = False
+        e.windup, e.locked, e.action, e.path = 0.0, False, "", []
+        e.last_attacker = None
+        e.foe = None
+        e.choose_foe()
+        e.fsm.change(ESCORT if e.foe is None else e.combat_state())
+        for o in self.enemies:
+            if o.side == "argus":
+                if o.foe is e or o.alert:
+                    o.think = min(o.think, 0.1)                     # everyone reconsiders
+        self.rewrites += 1
+        if not p.rewrote_before:
+            p.rewrote_before = True
+            self.say("That was mine, Seven. Give it back.")
+        self.fx += [("zap", p.pos, e.pos), ("ring", e.pos, COLOURS["player"], 2.0),
+                    ("text", e.pos, "REWRITTEN", COLOURS["player"]), ("shake", 0.25)]
+        self.sounds.append("hack")
+        return "REWRITTEN"
+
+    def _overloads(self):
+        for e in list(self.enemies):
+            if e.side == "seven" and not e.dead and self.time >= e.turned_until:
+                self.overload(e)
+
+    def overload(self, e):
+        """A rewritten unit's time is up: it burns out in a blast that hurts ARGUS's units."""
+        k = self.player.stats.overload
+        for o in list(self.enemies):
+            if o.side == "argus" and not o.dead and distance(o.pos, e.pos) < OVERLOAD_RADIUS * (1 + 0.3 * (k - 1)):
+                d, _ = normalize((o.pos[0] - e.pos[0], o.pos[1] - e.pos[1]))
+                self.damage_enemy(o, OVERLOAD_DAMAGE * k, d, e.pos, e)
+        self.fx += [("ring", e.pos, COLOURS["player"], OVERLOAD_RADIUS), ("text", e.pos, "OVERLOAD", COLOURS["player"])]
+        if not e.dead:
+            self.kill(e)
+
+    def firewall_down(self, e):
+        self.fx += [("burst", e.pos, (170, 210, 255), 0.4), ("text", e.pos, "FIREWALL DOWN", (170, 210, 255))]
+        self.sounds.append("slam")
 
     def _pickups(self, dt: float):
         p = self.player
@@ -271,7 +426,9 @@ class Room:
         self.warps = still
 
     def _progress(self):
-        if self.state == "fight" and not self.enemies and not self.warps:
+        if self.state == "fight" and not any(e.side == "argus" for e in self.enemies) and not self.warps:
+            for e in list(self.enemies):                           # rewritten units shut down
+                self.kill(e)
             if self.wave + 1 < len(self.plan.waves):
                 self.wave += 1
                 self._place_wave(self.plan.waves[self.wave], warp=True)
@@ -303,17 +460,19 @@ class Room:
     # --- called by the AI ----------------------------------------------------------------
     def shout(self, e, where: Point):
         """A spotter alerts every calm ally within earshot."""
+        if e.side != "argus":
+            return
         self.fx.append(("ring", e.pos, COLOURS[e.kind], C.ALERT_RADIUS))
         self.sounds.append("alert")
         for o in self.enemies:
-            if o is not e and not o.alert and distance(o.pos, e.pos) <= C.ALERT_RADIUS:
+            if o is not e and o.side == "argus" and not o.alert and distance(o.pos, e.pos) <= C.ALERT_RADIUS:
                 o.become_alert(where, shout=False)
 
     def enemy_shot(self, e, pos: Point, angle: float, speed: float, heavy: bool = False):
         v = from_angle(angle, speed)
-        self.bullets.append(Bullet(pos, v, 0.1 if heavy else C.ENEMY_BULLET_RADIUS, 1, True, e, heavy=heavy,
+        self.bullets.append(Bullet(pos, v, 0.1 if heavy else C.ENEMY_BULLET_RADIUS, 1, e.side, e, heavy=heavy,
                                    life=4.0))
-        self.fx.append(("muzzle", pos, angle, COLOURS[e.kind]))
+        self.fx.append(("muzzle", pos, angle, self.colour(e)))
         self.sounds.append("snipe" if heavy else "eshoot")
 
     def hurt_player(self, source, amount: int, direction: Point | None = None) -> bool:
@@ -332,6 +491,8 @@ class Room:
         return True
 
     def kill(self, e):
+        if e.dead and e not in self.enemies:
+            return
         e.dead = True
         if e in self.enemies:
             self.enemies.remove(e)
@@ -340,8 +501,30 @@ class Room:
         self.kills += 1
         self.score += e.worth
         big = e.kind == "warden"
-        self.fx += [("burst", e.pos, COLOURS[e.kind], 3.0 if big else 1.0), ("shake", 1.0 if big else 0.3),
-                    ("stop", 0.25 if big else 0.05), ("text", e.pos, f"+{e.worth}", COLOURS[e.kind])]
+        colour = self.colour(e)
+        self.fx += [("burst", e.pos, colour, 3.0 if big else 1.0), ("shake", 1.0 if big else 0.3),
+                    ("stop", 0.25 if big else 0.05), ("text", e.pos, f"+{e.worth}", colour)]
+        for o in self.enemies:                                  # nobody keeps aiming at the dead
+            if o.last_attacker is e:
+                o.last_attacker = None
+            if o.foe is e:
+                o.foe = None if o.side == "seven" else self.player
+                if o.foe is None:
+                    o.choose_foe()
+                if o.foe is None:
+                    o.fsm.change(ESCORT)
+                else:
+                    o.senses.switch(o, o.foe)
+                    o.think = 0.0
+        p = self.player
+        if e.side == "argus" and not big:
+            p.charge_progress += 1
+            if p.charge_progress >= KILLS_PER_CHARGE:
+                p.charge_progress = 0
+                if p.charges < p.stats.max_charges:
+                    p.charges += 1
+                    self.fx.append(("text", p.pos, "+1 CHARGE", COLOURS["player"]))
+                    self.sounds.append("charge")
         self.sounds.append("boom" if big else "kill")
         if self.rng.random() < DROP_CHANCE[e.kind]:
             self.pickups.append(Pickup(e.pos))
@@ -361,7 +544,13 @@ class Room:
         if self.rng.random() < 0.25:
             self.fx.append(("heal", target.pos))
 
+    def say(self, line: str):
+        """ARGUS speaks (shown as a subtitle)."""
+        self.plan.line = line
+        self.fx.append(("say", line))
+
     def boss_phase(self, w):
+        self.say(PHASE_LINES.get(w.phase, ""))
         self.fx += [("ring", w.pos, COLOURS["warden"], 6.0), ("shake", 0.8), ("stop", 0.15),
                     ("text", w.pos, f"PHASE {w.phase}", (255, 230, 120))]
         self.sounds.append("boom")

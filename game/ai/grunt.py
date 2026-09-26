@@ -23,12 +23,14 @@ import math
 from game import config as C
 from game.ai.agent import REACTION, Enemy, THINK_EVERY, muzzle
 from game.ai.fsm import State
-from game.geometry import angle_to, band, center, clamp, distance, from_angle, normalize
+from game.geometry import angle_diff, angle_to, band, center, clamp, distance, from_angle, normalize
 
 WINDUP = 0.6
 BURST = 3
 BURST_GAP = 0.12
 FAN = math.radians(5)                   # the 3 rounds fan out a little: step well clear of the line
+# A Sentry that ARGUS taught to PREDICT brackets you instead: one round where you are, one where
+# you're heading, one halfway. Dodging and running on are both covered (the three lines show it).
 
 
 class Grunt(Enemy):
@@ -43,6 +45,7 @@ class Grunt(Enemy):
         super().__init__(*args, **kwargs)
         self.cover_ban = 0.0              # just left cover: fight for a bit before hiding again
         self.spot_tile = None
+        self.fan = FAN
         self.strafe_dir = 1
         self.shots_left = 0
 
@@ -56,7 +59,7 @@ class Grunt(Enemy):
     def options(self):
         room, s = self.room, self.senses
         sees = s.sees
-        d = distance(self.pos, self.player.pos) if sees else distance(self.pos, self.target())
+        d = distance(self.pos, self.foe.pos) if sees else distance(self.pos, self.target())
         health = self.health
         fire = self.under_fire()
         fresh = s.age(self.now) < C.MEMORY_TIME
@@ -71,7 +74,8 @@ class Grunt(Enemy):
             o["reposition"] = 0.5 if fresh else 0.0
         else:
             o["reposition"] = 0.45 if (d < 2.5 or d > 9) else 0.0
-        engaged = sum(1 for e in room.enemies if e is not self and e.alert and e.senses.sees)
+        engaged = sum(1 for e in room.enemies if e is not self and e.side == self.side and e.alert
+                      and e.senses.sees and e.foe is self.foe)
         o["flank"] = 0.62 if ((not sees or not token) and fresh and health > 0.4 and engaged >= 1
                               and room.coordinator.flank_free(self)) else 0.0
         return o
@@ -87,11 +91,12 @@ class Grunt(Enemy):
             self.spot_tile = tactics.firing_spot(self, self.target(), 3.0, 8.0)
             return self.spot_tile is not None or self.senses.last_known is not None
         elif action == "flank":
-            pinners = [e for e in self.room.enemies if e is not self and e.alert and e.senses.sees]
+            pinners = [e for e in self.room.enemies if e is not self and e.side == self.side and e.alert
+                       and e.senses.sees and e.foe is self.foe]
             if not pinners:
                 return False
-            anchor = min(pinners, key=lambda e: distance(e.pos, self.player.pos))
-            pinned_from = angle_to(self.player.pos, anchor.pos)
+            anchor = min(pinners, key=lambda e: distance(e.pos, self.foe.pos))
+            pinned_from = angle_to(self.foe.pos, anchor.pos)
             self.spot_tile = tactics.flank_spot(self, self.target(), pinned_from)
             return self.spot_tile is not None
         elif action == "shoot":
@@ -110,7 +115,7 @@ class Engage(State):
 
     def update(self, g, dt):
         g.brake(dt)
-        g.face_player(dt)
+        g.face_foe(dt)
         g.rethink(dt)
 
 
@@ -123,6 +128,7 @@ class Aim(State):
         g.locked = False
         g.blind = 0.0
         g.aim = angle_to(g.pos, g.target())
+        g.fan = FAN
 
     def update(self, g, dt):
         g.brake(dt)
@@ -131,7 +137,11 @@ class Aim(State):
         if not g.locked:
             if g.senses.sees:
                 g.blind = 0.0
-                g.aim = angle_to(g.pos, g.player.pos)
+                now = angle_to(g.pos, g.foe.pos)
+                ahead = angle_to(g.pos, g.lead(C.ENEMY_BULLET_SPEED * g.room.tuning["bullet"]))
+                half = angle_diff(now, ahead) / 2
+                g.fan = half if abs(half) > FAN else math.copysign(FAN, half or 1.0)
+                g.aim = now + half
             else:
                 g.blind += dt
                 if g.blind > 0.3:                       # lost the shot: give the token back
@@ -157,7 +167,7 @@ class Fire(State):
         g.brake(dt)
         g.timer -= dt
         if g.timer <= 0 and g.shots_left > 0:
-            a = g.aim + (g.shots_left - 2) * FAN
+            a = g.aim + (g.shots_left - 2) * g.fan
             g.room.enemy_shot(g, muzzle(g, a), a, C.ENEMY_BULLET_SPEED * g.room.tuning["bullet"])
             g.shots_left -= 1
             g.timer = BURST_GAP
@@ -183,8 +193,8 @@ class Strafe(State):
         if g.timer <= 0:
             g.strafe_dir *= -1
             g.timer = g.room.rng.uniform(0.8, 1.6)
-        to_player = angle_to(g.pos, g.player.pos)
-        d = distance(g.pos, g.player.pos)
+        to_player = angle_to(g.pos, g.foe.pos)
+        d = distance(g.pos, g.foe.pos)
         side = from_angle(to_player + g.strafe_dir * math.pi / 2)
         radial = 0.0 if 3.5 < d < 7.5 else (-0.8 if d <= 3.5 else 0.6)
         want, _ = normalize((side[0] + math.cos(to_player) * radial, side[1] + math.sin(to_player) * radial))
@@ -213,7 +223,7 @@ class Reposition(State):
         g.timer += dt
         arrived = g.follow(dt, g.speed, face=not g.senses.sees)
         if g.senses.sees:
-            g.face(angle_to(g.pos, g.player.pos), dt)
+            g.face(angle_to(g.pos, g.foe.pos), dt)
         if arrived or g.timer > 4:
             g.action = ""
             g.think = 0.0
@@ -275,8 +285,8 @@ class Hide(State):
     def update(self, g, dt):
         g.timer += dt
         g.brake(dt)
-        g.face_player(dt)
-        close = g.senses.sees and distance(g.pos, g.player.pos) < 2.5
+        g.face_foe(dt)
+        close = g.senses.sees and distance(g.pos, g.foe.pos) < 2.5
         if g.timer > g.hide_for or close:
             g.action = ""
             g.fsm.change(ENGAGE)

@@ -64,6 +64,12 @@ class Game:
         self.end_time = 0.0
         self.hovered = None
         self.aim_px = (WIDTH / 2, HEIGHT / 2)
+        self.syncing = False
+        self.hack_queued = None
+        self.argus_time = 99.0
+        self.story_seen = False
+        self.story_page = 0
+        self.story_time = 0.0
         self.scripted = None               # tests: a function(run) -> (move, aim, firing, dash)
         self.running = True
         self.scenes = StateMachine(self, TITLE_SCENE)

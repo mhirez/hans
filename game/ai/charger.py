@@ -75,7 +75,7 @@ class Engage(State):
 
     def update(self, h, dt):
         h.brake(dt)
-        h.face_player(dt)
+        h.face_foe(dt)
         h.rethink(dt)
 
 
@@ -104,8 +104,8 @@ class Circle(State):
         h.orbit = h.room.rng.choice((-1, 1))
 
     def update(self, h, dt):
-        to = angle_to(h.pos, h.player.pos)
-        d = distance(h.pos, h.player.pos)
+        to = angle_to(h.pos, h.foe.pos)
+        d = distance(h.pos, h.foe.pos)
         radial = 0.7 if d > 5.2 else (-0.7 if d < 3.8 else 0.0)
         side = from_angle(to + h.orbit * math.pi / 2)
         want, _ = normalize((side[0] + math.cos(to) * radial, side[1] + math.sin(to) * radial))
@@ -158,9 +158,9 @@ class Charge(State):
         moved = distance(before, h.pos)
         h.travelled += moved
         h.room.trail(h)
-        p = h.player
-        if distance(h.pos, p.pos) < h.radius + p.radius + 0.1:
-            h.room.hurt_player(h, 1)
+        struck = next((t for t in h.hostiles() if distance(h.pos, t.pos) < h.radius + t.radius + 0.1), None)
+        if struck is not None:
+            h.room.strike(h, struck, 1)
             self.finish(h)
             h.fsm.change(RECOVER)
         elif moved < step * 0.5 or (h.travelled >= h.charge_len and h.charge_len < CHARGE_DIST - 0.05):

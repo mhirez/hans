@@ -39,11 +39,14 @@ class FX:
         self.flash_colour = (255, 255, 255)
         self.flash = 0.0
         self.warps: list[list] = []      # [x, y, age]
+        self.zaps: list[list] = []       # [points, life] rewrite lightning
         self.t = 0.0
+        self.said = False                # ARGUS started a new line this frame
 
     def clear(self):
         self.particles.clear()
         self.warps.clear()
+        self.zaps.clear()
         self.trauma = 0.0
         self.flash = 0.0
 
@@ -51,7 +54,9 @@ class FX:
     def consume(self, events: list[tuple]):
         for ev in events:
             kind = ev[0]
-            if kind == "shake":
+            if kind == "say":
+                self.said = True
+            elif kind == "shake":
                 self.trauma = min(1.0, self.trauma + ev[1])
             elif kind == "stop":
                 self.stop = max(self.stop, ev[1])
@@ -84,6 +89,19 @@ class FX:
             elif kind == "warp":
                 x, y = px(ev[1])
                 self.warps.append([x, y, 0.0])
+            elif kind == "zap":
+                a, b = px(ev[1]), px(ev[2])
+                pts = [a]
+                n = 9
+                for i in range(1, n):
+                    f = i / n
+                    jitter = self.rng.uniform(-14, 14)
+                    nx, ny = -(b[1] - a[1]), b[0] - a[0]
+                    length = math.hypot(nx, ny) or 1
+                    pts.append((a[0] + (b[0] - a[0]) * f + nx / length * jitter,
+                                a[1] + (b[1] - a[1]) * f + ny / length * jitter))
+                pts.append(b)
+                self.zaps.append([pts, 0.3])
 
     def sparks(self, pos, colour, n: int, speed: float):
         for _ in range(n):
@@ -111,6 +129,9 @@ class FX:
         self.t += dt
         self.trauma = max(0.0, self.trauma - dt * 1.8)
         self.flash = max(0.0, self.flash - dt)
+        for z in self.zaps:
+            z[1] -= dt
+        self.zaps = [z for z in self.zaps if z[1] > 0]
         for w in self.warps:
             w[2] += dt
         self.warps = [w for w in self.warps if w[2] < 1.15]
@@ -146,6 +167,13 @@ class FX:
 
     def draw(self, surface, off):
         ox, oy = off
+        for pts, life in self.zaps:
+            moved = [(x + ox, y + oy) for x, y in pts]
+            k = life / 0.3
+            pygame.draw.lines(surface, S.scale(S.PLAYER, k), False, moved, 5)
+            pygame.draw.lines(surface, S.scale(S.WHITE, k), False, moved, 2)
+            for p in moved[::3]:
+                S.add_glow(surface, p, 16, S.scale(S.PLAYER, 0.6 * k))
         for p in self.particles:
             k = p.life / p.max_life
             x, y = p.x + ox, p.y + oy

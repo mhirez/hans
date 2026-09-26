@@ -38,6 +38,8 @@ class RoomPlan:
     index: int                         # 0-based within the floor
     kind: str                          # "normal", "lockdown" or "boss"
     waves: list[list[str]] = field(default_factory=list)
+    mods: list[str] = field(default_factory=list)      # ARGUS's countermeasures (see director.py)
+    line: str = ""                                     # what ARGUS says as you enter
 
     @property
     def number(self) -> int:

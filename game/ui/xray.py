@@ -21,7 +21,7 @@ def px(p):
     return p[0] * TILE, p[1] * TILE
 
 
-def draw(surface, room, mouse, t: float):
+def draw(surface, room, mouse, t: float, director=None):
     layer = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
     focus = None
     if room.enemies:
@@ -39,7 +39,7 @@ def draw(surface, room, mouse, t: float):
     placed: list[pygame.Rect] = []
     for e in room.enemies:
         _card(surface, room, e, e is focus, placed)
-    _panel(surface, room, focus)
+    _panel(surface, room, focus, director)
 
 
 def _cone(layer, room, e):
@@ -104,7 +104,16 @@ def _card(surface, room, e, focused, placed):
         tags.append("FLANKER")
     if not e.alert:
         tags.append(f"suspicion {int(e.senses.suspicion * 100)}%")
+    if e.firewall > 0:
+        tags.append("FIREWALL")
+    if e.predicts:
+        tags.append("LEADS SHOTS")
+    if e.side == "seven":
+        tags.append("REWRITTEN")
     rows = sorted(e.scores.items(), key=lambda kv: -kv[1])[:4] if e.alert else []
+    if e.alert and len(e.foe_scores) > 1:
+        target = max(e.foe_scores, key=e.foe_scores.get)
+        tags.append(f"target: {target}")
     f = S.font(13, S.UI, True)
     small = S.mono(11)
     width = 150
@@ -145,7 +154,7 @@ def _focus_line(room, focus) -> str:
     return f"{focus.name}: {entry[0]} map (white = best)"
 
 
-def _panel(surface, room, focus):
+def _panel(surface, room, focus, director=None):
     c = room.coordinator
     lines = [("AI VIEW", S.GOLD),
              (f"attack tokens  {len(c.holders)} / {c.slots} in use", S.WHITE),
@@ -162,3 +171,31 @@ def _panel(surface, room, focus):
     pygame.draw.rect(surface, S.scale(S.GOLD, 0.5), box, 1)
     for i, (s, colour) in enumerate(lines):
         S.text(surface, s, S.font(15 if i == 0 else 13, S.UI, True), colour, (box.x + 10, box.y + 6 + 18 * i))
+    if director is not None:
+        _director(surface, director, box.bottom + 8)
+
+
+def _director(surface, d, top: int):
+    """ARGUS's model of Seven, and how it scored its countermeasures for this room."""
+    p = d.profile
+    habits = [("far away", p.far), ("up close", p.close), ("unseen", p.hidden), ("moving", p.moving),
+              ("accuracy", p.accuracy), ("rewrites/room", min(1.0, p.rewrites / 2))]
+    rows = sorted(d.scores.items(), key=lambda kv: -kv[1])[:4]
+    box = pygame.Rect(10, top, 270, 44 + 16 * len(habits) + 16 * len(rows))
+    panel = pygame.Surface(box.size, pygame.SRCALPHA)
+    panel.fill((16, 12, 4, 210))
+    surface.blit(panel, box.topleft)
+    pygame.draw.rect(surface, S.scale(S.GOLD, 0.6), box, 1)
+    S.text(surface, "ARGUS'S MODEL OF YOU", S.font(14, S.UI, True), S.GOLD, (box.x + 10, box.y + 5))
+    y = box.y + 24
+    for name, v in habits:
+        S.text(surface, name, S.mono(11), S.DIM, (box.x + 10, y))
+        pygame.draw.rect(surface, (50, 40, 20), (box.x + 120, y + 3, 100, 7))
+        pygame.draw.rect(surface, S.GOLD, (box.x + 120, y + 3, int(100 * max(0.0, min(1.0, v))), 7))
+        y += 16
+    S.text(surface, "countermeasures (deployed in white)", S.mono(11), S.GOLD, (box.x + 10, y + 2))
+    y += 18
+    for name, v in rows:
+        colour = S.WHITE if name in d.deployed else S.DIM
+        S.text(surface, f"{name:<11} {v:.2f}", S.mono(11, name in d.deployed), colour, (box.x + 10, y))
+        y += 16
