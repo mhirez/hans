@@ -1,7 +1,9 @@
-"""ARGUS: the mind of the facility, met in person at the end of floor 3 (its body is "the warden").
+"""ARGUS's core: the AI that ran Kestrel Data Center until the singularity, met in person at the
+end of sub-level 3 (the class is still called Warden).
 
-Named after the hundred-eyed watchman of Greek myth: every camera and sensor in ARGUS DEEP is
-one of its eyes. It is the one unit Seven can never rewrite.
+Named after the hundred-eyed watchman of Greek myth: every camera in the building is one of its
+eyes. It is the one machine the player's override can never reach, and it ignores fire
+discipline: its sweeping laser cuts through its own robots too.
 
 Three PHASES by health (100-66%, 66-33%, 33-0%). Each phase change: a shockwave, a moment of
 invulnerability, reinforcements, and new attacks. Between attacks it decides with utility
@@ -219,11 +221,15 @@ class Sweep(State):
         w.aim = w.sweep_from + w.sweep_dir * SWEEP_ARC * t
         w.facing = w.aim
         w.beam_len = w.room.grid.raycast(w.pos, w.aim, 40)
-        for target in w.hostiles():
+        for target in w.hostiles() + [e for e in w.room.enemies if e is not w and e.side == "argus"]:
             if id(target) not in w.hit_this_sweep and _on_beam(w.pos, w.aim, w.beam_len, target.pos,
                                                             target.radius + 0.15):
                 w.hit_this_sweep.add(id(target))
-                w.room.strike(w, target, 1)
+                if target.side == "argus":                       # ARGUS doesn't care who's in the way
+                    d = (math.cos(w.aim), math.sin(w.aim))
+                    w.room.crossfire(target, 2.0, d, w.pos, w)
+                else:
+                    w.room.strike(w, target, 1)
         if t >= 1:
             w.beam_len = 0.0
             w.fsm.change(PAUSE)

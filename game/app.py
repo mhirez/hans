@@ -12,6 +12,7 @@ from game.audio import Audio
 from game.run import Run
 from game.save import Best, DEFAULT_PATH
 from game.scenes import TITLE as TITLE_SCENE, PLAY
+from game.ui import style
 from game.ui.fx import FX
 from game.ui.render import Renderer
 from game.ui.screens import Screens
@@ -30,6 +31,7 @@ class Game:
     def __init__(self, seed: int | None = None, start_floor: int = 1, start_room: int = 1, xray: bool = False,
                  save_path: Path | None = DEFAULT_PATH, sound: bool = True):
         pygame.init()
+        style.reset()
         pygame.display.set_caption(TITLE)
         pygame.display.set_icon(_icon())
         flags = 0 if os.environ.get("SDL_VIDEODRIVER") == "dummy" else pygame.SCALED | pygame.RESIZABLE

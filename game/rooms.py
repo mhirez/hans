@@ -32,6 +32,12 @@ class Layout:
     style: str
 
 
+FLOOR_NAMES = {1: "SUB-LEVEL 1", 2: "SUB-LEVEL 2", 3: "SUB-LEVEL 3"}
+ROOM_NAMES = {1: ["LOBBY", "SERVER HALL A", "SERVER HALL B", "SECURITY"],
+              2: ["COOLING PLANT", "POWER ROOM", "NETWORK CORE", "UPLINK"],
+              3: ["DEEP STORAGE", "TRAINING CLUSTER", "MODEL VAULT", "THE CORE"]}
+
+
 @dataclass
 class RoomPlan:
     floor: int
@@ -44,6 +50,15 @@ class RoomPlan:
     @property
     def number(self) -> int:
         return self.index + 1
+
+    @property
+    def name(self) -> str:
+        names = ROOM_NAMES.get(self.floor)
+        return names[self.index] if names and self.index < len(names) else f"ROOM {self.number}"
+
+    @property
+    def floor_name(self) -> str:
+        return FLOOR_NAMES.get(self.floor, f"SUB-LEVEL {self.floor}")
 
 
 # --- layout ----------------------------------------------------------------------------------

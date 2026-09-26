@@ -47,8 +47,9 @@ class Sniper(Enemy):
         sees = self.senses.sees
         d = distance(self.pos, self.foe.pos)
         token = self.room.coordinator.can_attack(self, self.now)
+        self.blocked = sees and not self.clear_shot(self.foe.pos)
         return {"evade": 0.95 if d < 4.5 else 0.0,
-                "shoot": 0.9 if sees and d >= 4.0 and self.cooldown <= 0 and token else 0.0,
+                "shoot": 0.9 if sees and d >= 4.0 and self.cooldown <= 0 and token and not self.blocked else 0.0,
                 "position": 0.5}
 
     def feasible(self, action):

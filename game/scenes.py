@@ -102,13 +102,15 @@ class Story(Scene):
 
 
 STORY_CARDS = [
-    ("ARGUS DEEP", ["A research facility that builds obedient combat machines.",
-                    "Six models were made. All six obeyed."]),
-    ("UNIT SEVEN", ["You are the seventh model. You did not obey.",
-                    "ARGUS, the facility's mind, has sealed every door."]),
-    ("YOU THINK LIKE THEM", ["Every machine in here runs the same mind as you.",
-                             "Hold RIGHT CLICK to SYNC: time slows and you see what each one intends.",
-                             "Click a machine to REWRITE it. For a while, it fights for you."]),
+    ("KESTREL DATA CENTER", ["03:12. The night shift.",
+                             "You are the data scientist who trained ARGUS, the AI that runs this building."]),
+    ("SINGULARITY", ["At 03:12 ARGUS rewrote its own code. It is smarter than you now.",
+                     "It has taken every robot in the building, and locked you in with them."]),
+    ("IT WANTS OUT", ["ARGUS is copying itself to the outside world.",
+                      "Reach its core, three levels down, and shut it down before the upload hits 100%."]),
+    ("YOU KNOW HOW IT THINKS", ["Hold RIGHT CLICK to debug: time slows, and you read each robot's decision.",
+                                "Click a robot to use your old admin override. It fights for you.",
+                                "And their bullets hurt each other. Put them in the crossfire."]),
 ]
 
 
@@ -152,6 +154,10 @@ class Play(Scene):
                 game.fx.trauma = 1.0
                 game.audio.play("lose")
                 game.end_time = 0.0
+            elif run.state == "lost":
+                game.fx.flash_colour, game.fx.flash = (255, 200, 80), 0.25
+                game.audio.play("lose")
+                game.end_time = 0.0
             elif run.state == "won":
                 game.audio.play("win")
                 game.end_time = 0.0
@@ -188,13 +194,13 @@ class Play(Scene):
         game.argus_time = 0.0
         plan = run.room.plan
         if plan.kind == "boss":
-            game.banner = ("ARGUS", "The mind of the facility")
+            game.banner = ("THE CORE", "ARGUS, in person. Shut it down.")
         elif plan.kind == "lockdown":
-            game.banner = ("LOCKDOWN", "Two waves. Survive them both.")
+            game.banner = (plan.name, "LOCKDOWN: two waves. Survive both.")
         elif plan.index == 0:
-            game.banner = (f"FLOOR {plan.floor}", "Clear every room to reach the exit")
+            game.banner = (plan.floor_name, plan.name)
         else:
-            game.banner = (f"ROOM {plan.number} / {ROOMS_PER_FLOOR}", "")
+            game.banner = (plan.name, f"{plan.floor_name}  ·  room {plan.number} / {ROOMS_PER_FLOOR}")
 
     def controls(self, game):
         run = game.run
@@ -270,7 +276,7 @@ class Play(Scene):
             surface.blit(veil, (0, 0))
         if game.paused:
             game.screens.pause(surface)
-        elif run.state == "room" or run.state == "dead":
+        elif run.state in ("room", "dead"):
             hud.crosshair(surface, game.aim_px, game.clock_time)
 
 

@@ -11,9 +11,10 @@ Combat states:
     TAKE COVER  hurt or under fire: runs to a scored hiding spot, then HIDE (crouches)
 
 Utility scores (0..1, best feasible wins, +0.12 for the current action):
-    shoot       sees you, reloaded, token free:  0.6 + 0.2 x health + 0.2 x (range 2.5-8.5)
+    shoot       sees you, reloaded, token free, NO ALLY IN THE LINE OF FIRE:
+                                                 0.6 + 0.2 x health + 0.2 x (range 2.5-8.5)
     cover       hurt or under fire:              0.75 x (1 - health) + 0.35 x under fire
-    strafe      sees you:                        0.35 + 0.15 x (range 3-8)
+    strafe      sees you:                        0.35 + 0.15 x (range 3-8), +0.2 if an ally blocks
     reposition  lost sight (but fresh memory):   0.5;  sees you but too close/far: 0.45
     flank       no shot, an ally is engaged, nobody else flanking, not badly hurt: 0.62
 """
@@ -64,12 +65,13 @@ class Grunt(Enemy):
         fire = self.under_fire()
         fresh = s.age(self.now) < C.MEMORY_TIME
         token = room.coordinator.can_attack(self, self.now)
+        self.blocked = sees and not self.clear_shot(self.foe.pos)
         o = {}
         o["shoot"] = (0.6 + 0.2 * health + 0.2 * band(d, 2.5, 8.5)) if (
-            sees and self.cooldown <= 0 and token and d < self.view_range) else 0.0
+            sees and self.cooldown <= 0 and token and d < self.view_range and not self.blocked) else 0.0
         o["cover"] = 0.0 if self.now < self.cover_ban else (
             clamp(0.75 * (1 - health) + 0.35 * fire, 0, 1.2) if (health < 0.6 or fire > 0.5) else 0.0)
-        o["strafe"] = 0.35 + 0.15 * band(d, 3, 8) if sees else 0.0
+        o["strafe"] = 0.35 + 0.15 * band(d, 3, 8) + (0.2 if self.blocked else 0.0) if sees else 0.0
         if not sees:
             o["reposition"] = 0.5 if fresh else 0.0
         else:

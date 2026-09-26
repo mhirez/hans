@@ -52,7 +52,9 @@ class Charger(Enemy):
         sees = self.senses.sees
         d = distance(self.pos, self.target())
         token = self.room.coordinator.can_attack(self, self.now)
-        return {"charge": 0.9 if sees and 2.0 <= d <= 7.0 and token and self.cooldown <= 0 else 0.0,
+        self.blocked = sees and not self.clear_shot(self.target(), 0.35)
+        return {"charge": 0.9 if sees and 2.0 <= d <= 7.0 and token and self.cooldown <= 0 and not self.blocked
+                else 0.0,
                 "stalk": 0.6 if (not sees or d > 7.0) else 0.0,
                 "circle": 0.4 if sees else 0.0}
 

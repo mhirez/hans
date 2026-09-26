@@ -14,11 +14,15 @@ In combat each type DECIDES what to do with utility scores: every option gets a 
 attack token free...). The best feasible option wins, with a bonus for the current one so it
 doesn't dither. Scores are kept on the enemy so the AI View can show them.
 
-SIDES. Every unit belongs to ARGUS until Seven rewrites it; then it fights for Seven with
-exactly the same brain. So an enemy never assumes its target is the player: before deciding,
-it CHOOSES A FOE among the hostiles it can see (utility again: close, visible, a traitor,
-the one that just shot me, badly hurt...), and everything else (aim, cover, flank, heal) is
-worked out relative to that foe.
+SIDES. Every robot belongs to ARGUS until the player overrides it; then it fights for the
+player with exactly the same brain. So a robot never assumes its target is the player: before
+deciding, it CHOOSES A FOE among the hostiles it can see (utility again: close, visible, a
+traitor, the one that just shot me, badly hurt...), and everything else (aim, cover, flank,
+heal) is worked out relative to that foe.
+
+FIRE DISCIPLINE. ARGUS's bullets hurt ARGUS's robots, so before choosing to shoot (or charge)
+a robot checks that no ally stands in its line of fire (clear_shot). It only checks when
+deciding, so an ally that steps in during the wind-up can still be hit (crossfire).
 """
 
 import math
@@ -83,9 +87,11 @@ class Enemy:
         self.foe = room.player            # who it's fighting (the player, or a traitor)
         self.foe_scores: dict[str, float] = {}
         self.last_attacker = None
-        self.turned_until = 0.0           # rewritten by Seven until this time
+        self.turned_until = 0.0           # rewritten by the player until this time
         self.firewall = 0.0               # shield that blocks rewriting (ARGUS's countermeasure)
         self.predicts = False             # leads its shots (ARGUS's countermeasure)
+        self.blocked = False              # an ally is standing in its line of fire
+        self.crossfire_shown = -99.0
         self.fsm = StateMachine(self, PATROL)
 
     # --- facts ---------------------------------------------------------------------------
@@ -107,7 +113,7 @@ class Enemy:
 
     @property
     def turned(self) -> bool:
-        return self.side == "seven"
+        return self.side == "player"
 
     def under_fire(self) -> float:
         """1 just after being shot at, fading to 0 over 1.5 s."""
@@ -132,7 +138,7 @@ class Enemy:
             self.knock = (self.knock[0] * decay, self.knock[1] * decay)
         self.perceive(dt)
         if self.foe is None and self.needs_foe and self.fsm.current not in (ESCORT, STUNNED):
-            self.fsm.change(ESCORT)                     # nobody left to fight: stay with Seven
+            self.fsm.change(ESCORT)                     # nobody left to fight: stay with the player
         self.fsm.update(dt)
 
     def perceive(self, dt: float):
@@ -208,6 +214,23 @@ class Enemy:
     def hostiles(self) -> list:
         return self.room.hostiles_of(self)
 
+    def clear_shot(self, target: Point, margin: float = 0.25) -> bool:
+        """Is any ally standing in the line of fire? (Robots' bullets hurt robots.)"""
+        ax, ay = self.pos
+        dx, dy = target[0] - ax, target[1] - ay
+        length2 = dx * dx + dy * dy
+        if length2 < 1e-9:
+            return True
+        for o in self.room.enemies:
+            if o is self or o.dead or o.side != self.side:
+                continue
+            t = ((o.pos[0] - ax) * dx + (o.pos[1] - ay) * dy) / length2
+            if 0.0 < t < 1.0:
+                px, py = ax + dx * t, ay + dy * t
+                if (o.pos[0] - px) ** 2 + (o.pos[1] - py) ** 2 < (o.radius + margin) ** 2:
+                    return False
+        return True
+
     def choose_foe(self):
         """Target selection: who is the biggest threat right now? (utility, with hysteresis)"""
         grid = self.room.grid
@@ -221,7 +244,7 @@ class Enemy:
             s = 1.0 / (1 + d / 6)
             if h is self.player:
                 s += 0.25
-            elif h.side == "seven":
+            elif h.side == "player":
                 s += 0.45                               # a traitor in the ranks: deal with it first
             if h is self.last_attacker and self.now - self.hit_time < 3:
                 s += 0.5
@@ -230,7 +253,7 @@ class Enemy:
                 s += 0.2
             if not seen:
                 s -= 0.4
-            scores[getattr(h, "name", "SEVEN") if h is not self.player else "SEVEN"] = s
+            scores[getattr(h, "name", "YOU") if h is not self.player else "YOU"] = s
             if s > best_score:
                 best, best_score = h, s
         self.foe_scores = scores
@@ -422,7 +445,7 @@ class Search(State):
 
 
 class Escort(State):
-    """A rewritten unit with no enemy in sight: stays close to Seven, looking for one."""
+    """A rewritten unit with no enemy in sight: stays close to the player, looking for one."""
     name = "ESCORT"
 
     def enter(self, e):

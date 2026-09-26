@@ -1,4 +1,5 @@
-"""SYNC view: what Seven sees while time is slowed. Every machine shows what it INTENDS to do.
+"""DEBUG view (the SYNC mechanic): hold right click and time slows; you trained ARGUS, so you can
+read its robots' decisions. Every robot shows what it INTENDS to do.
 
 This is the player-facing half of the AI View: the same decisions, shown as plain words.
   ATTACK   it has an attack token and is winding up
@@ -72,7 +73,7 @@ def draw(surface, room, mouse_px, t: float, player):
 def _intent(surface, room, e, t):
     x, y = px(e.pos)
     label, colour = INTENT.get(e.state, (e.state, S.WHITE))
-    if e.side == "seven":
+    if e.side == "player":
         label, colour = ("YOURS " + label if label != "WITH YOU" else label), S.PLAYER
     elif e.uid in room.coordinator.holders:
         label = "ATTACK"
@@ -87,7 +88,7 @@ def _intent(surface, room, e, t):
 def _mind(surface, room, e, t):
     x, y = px(e.pos)
     r = e.radius * TILE * 1.6 + 6
-    colour = S.PLAYER if e.side == "seven" else COLOURS[e.kind]
+    colour = S.PLAYER if e.side == "player" else COLOURS[e.kind]
     for sx, sy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):                   # target brackets
         cx, cy = x + sx * r, y + sy * r
         pygame.draw.line(surface, colour, (cx, cy), (cx - sx * 10, cy), 3)
@@ -104,7 +105,7 @@ def _mind(surface, room, e, t):
     panel.fill((4, 10, 22, 235))
     surface.blit(panel, box.topleft)
     pygame.draw.rect(surface, colour, box, 2, border_radius=4)
-    name = f"{e.name}" + ("  (REWRITTEN)" if e.side == "seven" else "")
+    name = f"{e.name}" + ("  (OVERRIDDEN)" if e.side == "player" else "")
     S.text(surface, name, S.display(20), colour, (box.x + 10, box.y + 6))
     yy = box.y + 32
     for option, v in rows:
@@ -114,23 +115,23 @@ def _mind(surface, room, e, t):
         pygame.draw.rect(surface, colour if chosen else S.FAINT, bar)
         S.text(surface, f"{v:.2f}", S.mono(12), S.WHITE if chosen else S.DIM, (box.right - 8, yy), "topright")
         yy += 18
-    if e.side == "seven":
+    if e.side == "player":
         left = max(0.0, e.turned_until - room.time)
         S.text(surface, f"fights for you: {left:.1f}s", S.font(14, S.UI, True), S.PLAYER, (box.x + 10, yy + 2))
     elif why:
         S.text(surface, why, S.font(14, S.UI, True), (255, 120, 120), (box.x + 10, yy + 2))
     else:
         pulse = 0.6 + 0.4 * math.sin(t * 10)
-        S.text(surface, "CLICK: REWRITE  (1 charge)", S.font(14, S.UI, True), S.mix(S.BG, S.PLAYER, pulse),
+        S.text(surface, "CLICK: OVERRIDE  (1 charge)", S.font(14, S.UI, True), S.mix(S.BG, S.PLAYER, pulse),
                (box.x + 10, yy + 2))
 
 
 def _header(surface, player, t):
     y = HEIGHT - 76
-    S.spaced(surface, "SYNC", S.display(30), S.PLAYER, (WIDTH // 2, y), 10)
+    S.spaced(surface, "DEBUG", S.display(30), S.PLAYER, (WIDTH // 2, y), 10)
     bar = pygame.Rect(WIDTH // 2 - 110, y + 22, 220, 5)
     pygame.draw.rect(surface, (20, 40, 60), bar)
     pygame.draw.rect(surface, S.PLAYER, (bar.x, bar.y, int(bar.w * player.sync), bar.h))
-    hint = "hover a machine to read it  ·  click to rewrite it" if player.charges else \
+    hint = "hover a robot to read its decision  ·  click to override it" if player.charges else \
         "no charges: every 5 kills gives one"
     S.text(surface, hint, S.font(15, S.UI, True), S.DIM, (WIDTH // 2, y + 40), "center")

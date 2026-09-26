@@ -108,7 +108,9 @@ def _card(surface, room, e, focused, placed):
         tags.append("FIREWALL")
     if e.predicts:
         tags.append("LEADS SHOTS")
-    if e.side == "seven":
+    if e.blocked:
+        tags.append("ALLY IN LINE")
+    if e.side == "player":
         tags.append("REWRITTEN")
     rows = sorted(e.scores.items(), key=lambda kv: -kv[1])[:4] if e.alert else []
     if e.alert and len(e.foe_scores) > 1:
@@ -176,7 +178,7 @@ def _panel(surface, room, focus, director=None):
 
 
 def _director(surface, d, top: int):
-    """ARGUS's model of Seven, and how it scored its countermeasures for this room."""
+    """ARGUS's model of the player, and how it scored its countermeasures for this room."""
     p = d.profile
     habits = [("far away", p.far), ("up close", p.close), ("unseen", p.hidden), ("moving", p.moving),
               ("accuracy", p.accuracy), ("rewrites/room", min(1.0, p.rewrites / 2))]

@@ -44,4 +44,5 @@ ENEMY_BULLET_SPEED = 10.0
 
 # --- rooms --------------------------------------------------------------------------------
 ROOMS_PER_FLOOR = 4
-FLOORS = 3                             # the Warden waits at the end of floor 3
+FLOORS = 3                             # ARGUS's core waits at the end of sub-level 3
+UPLOAD_TIME = 900.0                    # ARGUS finishes copying itself out after 15 minutes of play

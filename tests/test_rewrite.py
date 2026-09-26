@@ -1,4 +1,4 @@
-"""SYNC / rewrite: Seven turns an ARGUS unit, which then fights for Seven with its own AI."""
+"""SYNC / rewrite: the player turns an ARGUS unit, which then fights for the player with its own AI."""
 
 from tests.helpers import arena, place, step
 
@@ -8,8 +8,8 @@ def test_a_rewritten_sentry_turns_on_its_squad_and_the_squad_turns_on_it():
     room.player.pos = (3.0, 3.0)
     traitor = place(room, "grunt", (12.0, 9.0), alert=True)
     loyal = place(room, "grunt", (18.0, 9.0), alert=True)
-    assert room.rewrite(traitor) == "REWRITTEN"
-    assert traitor.side == "seven" and traitor.foe is loyal and room.player.charges == 0
+    assert room.rewrite(traitor) == "OVERRIDDEN"
+    assert traitor.side == "player" and traitor.foe is loyal and room.player.charges == 0
     step(room, 0.5)
     assert loyal.foe is traitor                                  # a traitor in the ranks comes first
     hp = loyal.hp
@@ -17,13 +17,13 @@ def test_a_rewritten_sentry_turns_on_its_squad_and_the_squad_turns_on_it():
     assert loyal.hp < hp or loyal.dead                          # the traitor shot it
 
 
-def test_a_rewritten_mender_heals_seven():
+def test_an_overridden_mender_heals_the_player():
     room = arena()
     p = room.player
     p.hp = 2
     medic = place(room, "medic", (5.0, 9.0), alert=True)
     place(room, "grunt", (28.0, 2.0))                           # keeps the room from clearing
-    assert room.rewrite(medic) == "REWRITTEN"
+    assert room.rewrite(medic) == "OVERRIDDEN"
     step(room, 6.0)
     assert p.hp > 2 and medic.patient is p
 
@@ -56,7 +56,7 @@ def test_rewrite_needs_a_charge_line_of_sight_and_no_firewall():
     room.player.charges = 0
     assert room.rewrite(shielded) == "NO CHARGE"
     room.player.charges = 1
-    assert room.rewrite(shielded) == "REWRITTEN"
+    assert room.rewrite(shielded) == "OVERRIDDEN"
 
 
 def test_argus_itself_cannot_be_rewritten():

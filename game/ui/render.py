@@ -29,20 +29,28 @@ class Renderer:
     def __init__(self):
         self._bg_for = None
         self.bg: pygame.Surface | None = None
+        self.leds: list = []
         self.overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
 
     # --- the static room ---------------------------------------------------------------------
     def background(self, room) -> pygame.Surface:
         if self._bg_for is not room:
-            self.bg = build_background(room.grid, room.plan.floor * 100 + room.plan.index)
+            self.bg, self.leds = build_background(room.grid, room.plan.floor * 100 + room.plan.index)
             self._bg_for = room
         return self.bg
+
+    def _leds(self, surface, t, off):
+        """Status lights on the server racks: some steady, some blinking."""
+        for x, y, colour, rate, phase in self.leds:
+            on = rate == 0 or math.sin(t * rate + phase) > 0
+            pygame.draw.rect(surface, colour if on else S.scale(colour, 0.25), (x + off[0], y + off[1], 3, 2))
 
     # --- the frame ---------------------------------------------------------------------------
     def draw(self, surface, room, fx, t: float, off=(0, 0)):
         ox, oy = off
         surface.fill(S.BG)
         surface.blit(self.background(room), off)
+        self._leds(surface, t, off)
         self._doors(surface, room, t, off)
         fx.draw_under(surface, off)
         self._pickups(surface, room, t, off)
@@ -254,12 +262,12 @@ class Renderer:
         if e.firewall > 0:                                   # ARGUS's firewall: shoot it off first
             ring = S.polygon((x, y), r * 1.75, 6, t * 0.8)
             pygame.draw.polygon(surface, S.scale((170, 210, 255), 0.7 + 0.3 * math.sin(t * 6)), ring, 2)
-        if e.side == "seven":                                # rewritten: how long it's yours for
+        if e.side == "player":                                # rewritten: how long it's yours for
             left = max(0.0, e.turned_until - e.room.time) / e.room.player.stats.rewrite_time
             rect = pygame.Rect(0, 0, int(r * 3.2), int(r * 3.2))
             rect.center = (int(x), int(y))
             pygame.draw.arc(surface, S.PLAYER, rect, math.pi / 2, math.pi / 2 + 2 * math.pi * left, 2)
-            S.text(surface, "7", S.display(14), S.WHITE, (x + r * 1.2, y - r * 1.2), "center")
+            pygame.draw.polygon(surface, S.WHITE, S.polygon((x + r * 1.2, y - r * 1.2), 4, 4, 0))
         if e.hp < e.max_hp and e.kind != "warden":
             w = int(r * 2.2)
             bar = pygame.Rect(int(x - w / 2), int(y + r + 7), w, 4)
@@ -305,20 +313,33 @@ class Renderer:
             S.add_glow(surface, (x + off[0], y + off[1]), int(p.radius * TILE * 2.2), S.scale(S.PLAYER, life * 2.4))
         if p.invulnerable > 0 and not p.dashing and int(t * 16) % 2 == 0:
             return
+        # the data scientist, from above: lab-coat shoulders, hair, both arms out to a pistol
         x, y = px(p.pos)
         a = p.aim
         back = p.recoil * 3
         x, y = x + off[0] - math.cos(a) * back, y + off[1] - math.sin(a) * back
         r = p.radius * TILE * 1.3
-        colour = S.WHITE if p.hurt_flash > 0.25 else S.PLAYER
-        S.add_glow(surface, (x, y), int(r * 3), S.scale(S.PLAYER, 0.45))
-        pts = [(x + math.cos(a) * r * 1.6, y + math.sin(a) * r * 1.6),
-               (x + math.cos(a + 2.5) * r * 1.2, y + math.sin(a + 2.5) * r * 1.2),
-               (x - math.cos(a) * r * 0.45, y - math.sin(a) * r * 0.45),
-               (x + math.cos(a - 2.5) * r * 1.2, y + math.sin(a - 2.5) * r * 1.2)]
-        pygame.draw.polygon(surface, (14, 50, 64), pts)
-        pygame.draw.polygon(surface, colour, pts, 2)
-        pygame.draw.circle(surface, S.WHITE, (int(x), int(y)), 3)
+        edge = S.WHITE if p.hurt_flash > 0.25 else S.PLAYER
+        S.add_glow(surface, (x, y), int(r * 2.8), S.scale(S.PLAYER, 0.4))
+        ca, sa = math.cos(a), math.sin(a)
+
+        def at(along, across):                     # a point in the body's own frame
+            return x + ca * along - sa * across, y + sa * along + ca * across
+
+        for side in (-1, 1):                                                        # arms
+            pygame.draw.line(surface, (196, 210, 222), at(0.0, side * r * 0.72), at(r * 0.95, side * r * 0.12), 6)
+        pygame.draw.line(surface, (26, 30, 42), at(r * 0.8, 0), at(r * 1.65, 0), 6)  # pistol
+        pygame.draw.circle(surface, edge, [int(v) for v in at(r * 1.65, 0)], 2)
+        body = []
+        for k in range(24):
+            t = 2 * math.pi * k / 24
+            c, s_ = math.cos(t), math.sin(t)
+            body.append(at(math.copysign(abs(c) ** 0.6, c) * r * 0.42, math.copysign(abs(s_) ** 0.6, s_) * r * 0.95))
+        pygame.draw.polygon(surface, (214, 228, 238), body)                         # lab-coat shoulders
+        pygame.draw.polygon(surface, edge, body, 2)
+        head = [int(v) for v in at(r * 0.05, 0)]
+        pygame.draw.circle(surface, (52, 40, 34), head, int(r * 0.42))              # hair
+        pygame.draw.circle(surface, (20, 16, 14), head, int(r * 0.42), 1)
 
     def _bullets(self, surface, room, off):
         for b in room.bullets:
@@ -332,7 +353,7 @@ class Renderer:
                 pygame.draw.line(surface, S.PLAYER, tail, (x, y), 4)
                 pygame.draw.line(surface, S.WHITE, (x - dx * 7, y - dy * 7), (x, y), 2)
                 continue
-            colour = S.PLAYER if b.side == "seven" else COLOURS.get(getattr(b.owner, "kind", ""), S.DANGER)
+            colour = S.PLAYER if b.side == "player" else COLOURS.get(getattr(b.owner, "kind", ""), S.DANGER)
             if b.heavy:
                 tail = (x - dx * 34, y - dy * 34)
                 S.add_glow(surface, (x, y), 18, colour)
@@ -345,8 +366,9 @@ class Renderer:
                 pygame.draw.circle(surface, S.WHITE, (int(x), int(y)), max(2, rr - 3))
 
 
-def build_background(grid, seed: int) -> pygame.Surface:
+def build_background(grid, seed: int) -> tuple[pygame.Surface, list]:
     rng = random.Random(seed)
+    leds = []
     surf = pygame.Surface((WIDTH, HEIGHT))
     surf.fill(S.BG)
     edges = pygame.Surface((WIDTH, HEIGHT))
@@ -361,9 +383,15 @@ def build_background(grid, seed: int) -> pygame.Surface:
                 if rng.random() < 0.06:
                     for cx, cy in ((4, 4), (TILE - 5, 4), (4, TILE - 5), (TILE - 5, TILE - 5)):
                         pygame.draw.circle(surf, S.GRID, (rect.x + cx, rect.y + cy), 2)
-            elif ch == "X":
+            elif ch == "X":                                            # a server rack, seen from above
                 pygame.draw.rect(surf, S.COVER, rect)
-                pygame.draw.rect(surf, S.COVER_TOP, rect.inflate(-10, -10))
+                inner = rect.inflate(-6, -6)
+                pygame.draw.rect(surf, S.COVER_TOP, inner)
+                for k in range(inner.y + 4, inner.bottom - 2, 6):
+                    pygame.draw.line(surf, (40, 46, 76), (inner.x + 3, k), (inner.right - 12, k), 1)
+                    colour = rng.choice(((80, 255, 160), (90, 235, 255), (255, 200, 80), (80, 255, 160)))
+                    rate = rng.choice((0, 0, 0, 3.0, 7.0, 13.0))
+                    leds.append((inner.right - 9, k - 1, colour, rate, rng.uniform(0, 6.3)))
             else:
                 pygame.draw.rect(surf, S.WALL, rect)
                 if (c + r) % 3 == 0:
@@ -388,5 +416,5 @@ def build_background(grid, seed: int) -> pygame.Surface:
     for i in range(24):
         pygame.draw.rect(shade, (0, 0, 0, int(90 * (1 - i / 24) ** 2)), (i * 3, i * 3, WIDTH - i * 6, HEIGHT - i * 6), 3)
     surf.blit(shade, (0, 0))
-    return surf.convert() if pygame.display.get_surface() else surf
+    return (surf.convert() if pygame.display.get_surface() else surf), leds
 

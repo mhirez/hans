@@ -1,6 +1,6 @@
 """What an enemy knows about its foe: only what it has seen or heard (imperfect information).
 
-(Its foe is normally the player, Seven. It can be a rewritten traitor.)
+(Its foe is normally the player, the player. It can be a rewritten traitor.)
 
 SIGHT    a cone (100 degrees while calm, 220 once alert) that needs a clear line of sight;
          anything within 1.6 tiles is felt regardless.

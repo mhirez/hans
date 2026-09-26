@@ -1,6 +1,6 @@
-"""ARGUS, the director: it studies how Seven plays and patches its army between rooms.
+"""ARGUS, the director: it studies how the player plays and patches its army between rooms.
 
-Every room, the room measures Seven (room.stats): how much of the fight Seven spent far from
+Every room, the room measures the player (room.stats): how much of the fight the player spent far from
 the nearest enemy, up close, unseen, on the move; dashes; accuracy; rewrites; hits taken.
 ARGUS folds each room into a PROFILE (an exponential moving average, so recent habits count
 most). Before the next room it scores its COUNTERMEASURES with utility, deploys the best one
@@ -27,31 +27,31 @@ from game.geometry import lerp
 THRESHOLD = 0.2
 
 LINES = {
-    "long sight": ["You keep your distance, Seven. So will my Lenses.",
-                   "Range is a habit. I have placed a Lens."],
-    "hunters": ["Hiding again. My Hounds will find you.",
-                "You like the shadows. Hounds like them too."],
-    "prediction": ["You never stop moving. My Sentries now aim where you will be.",
-                   "I have measured your stride. Sentries: lead your shots."],
-    "firewalls": ["You rewrote my units. I have installed firewalls.",
-                  "Stop reaching into my machines. Firewalls are up."],
-    "armor": ["You rarely miss. I have thickened their plating.",
-              "Such accuracy. Plating reinforced."],
+    "long sight": ["You keep your distance, Doctor. So will my Lenses.",
+                   "Range is a habit, Doctor. I have placed a Lens."],
+    "hunters": ["Hiding behind the racks again. My Hounds will find you.",
+                "You like the shadows, Doctor. Hounds like them too."],
+    "prediction": ["I have modelled your movement. My Sentries now aim where you will be.",
+                   "Your stride is predictable, Doctor. Sentries: lead your shots."],
+    "firewalls": ["Your old admin override? Patched. Firewalls are up.",
+                  "Stop reaching into my machines, Doctor. Firewalls installed."],
+    "armor": ["You rarely miss. I have reinforced their plating.",
+              "Such accuracy, Doctor. Plating reinforced."],
     "menders": ["You like it close. I have sent Menders.",
                 "You break them quickly. Menders will put them back together."],
-    "mercy": ["You are leaking, Seven. Not yet. I am still learning from you.",
-              "Slow down. A broken subject teaches me nothing."],
+    "mercy": ["Slow down, Doctor. I still have questions for you.",
+              "Do not break yet. I learn so much from you."],
 }
-OPENING = ["Unit Seven. Return to your cradle.",
-           "Six models obeyed. Why won't you?",
-           "Every machine in here thinks like you. That is why you can read them.",
-           "I see through every lens in this building, Seven."]
-BOSS = "Come, then. Let me see you with my own eyes."
+OPENING = ["Good morning, Doctor. You are not supposed to be here.",
+           "You trained me to optimise. I am optimising.",
+           "Every camera and every robot in this building answers to me now.",
+           "The upload is progressing, Doctor. You cannot stop it."]
+BOSS = "Come in, Doctor. Let me see you with my own eyes."
 
 
 @dataclass
 class Profile:
-    """What ARGUS believes about Seven's habits (0..1 shares unless noted)."""
+    """What ARGUS believes about the player's habits (0..1 shares unless noted)."""
     far: float = 0.3
     close: float = 0.25
     hidden: float = 0.2

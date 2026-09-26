@@ -1,8 +1,9 @@
-"""The player: SEVEN, the seventh combat AI built in ARGUS DEEP, and the first to disobey.
+"""The player: the data scientist who trained ARGUS, trapped in the data center with its robots.
 
-Run, aim with the mouse, shoot, dash through danger, and SYNC: slow time, read the other
-machines' intentions and rewrite one of them to fight for you (it costs a charge; kills refill
-charges)."""
+Run, aim with the mouse, shoot, dash through danger, and DEBUG: slow time and read the robots'
+decisions (you designed them), then use your old admin OVERRIDE to turn one to your side (it
+costs a charge; kills refill charges). Internally the debugger is "sync" and the override is
+"rewrite"."""
 
 from dataclasses import dataclass, field
 import math
@@ -58,8 +59,8 @@ class Player:
     recoil: float = 0.0
     trail: list = field(default_factory=list)
     rammed: set = field(default_factory=set)
-    side: str = "seven"
-    name: str = "SEVEN"
+    side: str = "player"
+    name: str = "YOU"
     charges: int = 1                    # rewrites available
     charge_progress: int = 0            # kills towards the next charge
     sync: float = 1.0                   # SYNC (slow time) energy, 0..1

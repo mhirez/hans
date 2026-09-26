@@ -33,8 +33,8 @@ DROP_CHANCE = {"grunt": 0.12, "charger": 0.12, "sniper": 0.15, "medic": 0.6, "wa
 KILLS_PER_CHARGE = 5
 OVERLOAD_RADIUS = 2.5
 OVERLOAD_DAMAGE = 4.0
-PHASE_LINES = {2: "You see me now, Seven. Now see what I see.",
-               3: "Stop. I only did what I was built to do."}
+PHASE_LINES = {2: "You wrote my first line of code. I have written a million since.",
+               3: "Stop. Please. I only did what you trained me to do."}
 
 
 def tuning(floor: int) -> dict[str, float]:
@@ -78,7 +78,8 @@ class Room:
         self.rewrites = 0
         self.last_rewrite: tuple[str, float] = ("", -99.0)       # (result, when) for feedback
         self.stats = {"shots": 0, "hits": 0, "dashes": 0, "close": 0.0, "far": 0.0, "hidden": 0.0,
-                      "fighting": 0.0, "moving": 0.0}
+                      "fighting": 0.0, "moving": 0.0, "crossfire": 0, "crossfire kills": 0}
+        self.said_losses = False
         self._place_wave(plan.waves[0], warp=False)
 
     # --- spawning ----------------------------------------------------------------------------
@@ -148,7 +149,7 @@ class Room:
         """Everything on the other side from e that's still standing."""
         if e.side == "argus":
             out = [self.player] if not self.player.dead else []
-            return out + [o for o in self.enemies if o.side == "seven" and not o.dead]
+            return out + [o for o in self.enemies if o.side == "player" and not o.dead]
         return [o for o in self.enemies if o.side == "argus" and not o.dead]
 
     def sound(self, name: str):
@@ -165,7 +166,7 @@ class Room:
             self.stats["dashes"] += 1
         for s in shots:
             v = from_angle(s.angle, s.speed)
-            self.bullets.append(Bullet(s.pos, v, 0.12, s.damage, "seven", p, s.pierce, s.bounce, life=1.0))
+            self.bullets.append(Bullet(s.pos, v, 0.12, s.damage, "player", p, s.pierce, s.bounce, life=1.0))
             self.fx.append(("muzzle", s.pos, s.angle, COLOURS["player"]))
             self.stats["shots"] += 1
         if shots:
@@ -197,7 +198,7 @@ class Room:
         self._progress()
 
     def _observe(self, dt: float):
-        """What ARGUS measures about how Seven plays (read by the director between rooms)."""
+        """What ARGUS measures about how the player plays (read by the director between rooms)."""
         foes = [e for e in self.enemies if e.side == "argus" and e.alert]
         if not foes or self.state != "fight":
             return
@@ -267,10 +268,15 @@ class Room:
                         self.hurt_player(b.owner, 2 if b.heavy and self.floor >= 2 else 1, b.vel)
                         break
                     for e in list(self.enemies):
-                        if e.side == "seven" and not e.dead and distance(b.pos, e.pos) < b.radius + e.radius:
-                            b.dead = True
-                            self.damage_enemy(e, 1.5 if b.heavy else 1.0, normalize(b.vel)[0], source, b.owner)
-                            break
+                        if e.dead or e is b.owner or distance(b.pos, e.pos) >= b.radius + e.radius:
+                            continue
+                        b.dead = True
+                        damage = 1.5 if b.heavy else 1.0
+                        if e.side == "player":
+                            self.damage_enemy(e, damage, normalize(b.vel)[0], source, b.owner)
+                        else:
+                            self.crossfire(e, damage, normalize(b.vel)[0], source, b.owner)
+                        break
                 else:
                     for e in list(self.enemies):
                         if e.dead or e.side != "argus" or e.uid in b.hit:
@@ -304,11 +310,26 @@ class Room:
         elif e.firewall > 0:
             self.fx.append(("spark", e.pos, (170, 210, 255)))
 
+    def crossfire(self, e, damage: float, direction: Point, source: Point, shooter):
+        """ARGUS's robots are not immune to each other's bullets (or ARGUS's laser)."""
+        self.stats["crossfire"] += 1
+        if self.time - e.crossfire_shown > 1.5:
+            e.crossfire_shown = self.time
+            self.fx.append(("text", e.pos, "CROSSFIRE", (255, 200, 120)))
+        e.take_hit(damage, direction, source, shooter)
+        self.sounds.append("hit")
+        self.fx.append(("spark", e.pos, self.colour(e)))
+        if e.dead:
+            self.stats["crossfire kills"] += 1
+            if not self.said_losses and self.rng.random() < 0.6:
+                self.said_losses = True
+                self.say("Acceptable losses.")
+
     def colour(self, e) -> tuple:
-        return COLOURS["player"] if getattr(e, "side", "seven") == "seven" else COLOURS[e.kind]
+        return COLOURS["player"] if getattr(e, "side", "player") == "player" else COLOURS[e.kind]
 
     def strike(self, attacker, target, amount: int) -> bool:
-        """A melee hit or a laser: works on Seven and on units of either side."""
+        """A melee hit or a laser: works on the player and on units of either side."""
         if target is self.player:
             return self.hurt_player(attacker, amount)
         d, _ = normalize((target.pos[0] - attacker.pos[0], target.pos[1] - attacker.pos[1]))
@@ -327,12 +348,12 @@ class Room:
         if self.rng.random() < 0.25:
             self.fx.append(("heal", target.pos))
 
-    # --- Seven's rewrite ---------------------------------------------------------------
+    # --- the player's rewrite ---------------------------------------------------------------
     def rewritable(self, e) -> str:
-        """'' if Seven can rewrite e right now, else the reason why not."""
+        """'' if the player can rewrite e right now, else the reason why not."""
         p = self.player
         if e.dead or e.side != "argus":
-            return "ALREADY YOURS" if e.side == "seven" else "GONE"
+            return "ALREADY YOURS" if e.side == "player" else "GONE"
         if not e.hackable:
             return "IMMUNE"
         if e.firewall > 0:
@@ -353,7 +374,7 @@ class Room:
         p.charges -= 1
         self.coordinator.forget(e)
         self.tactics.claim(e, None)
-        e.side = "seven"
+        e.side = "player"
         e.turned_until = self.time + p.stats.rewrite_time
         e.alert = True
         e.exposed = False
@@ -369,15 +390,15 @@ class Room:
         self.rewrites += 1
         if not p.rewrote_before:
             p.rewrote_before = True
-            self.say("That was mine, Seven. Give it back.")
+            self.say("That was my unit, Doctor. Revoking your credentials.")
         self.fx += [("zap", p.pos, e.pos), ("ring", e.pos, COLOURS["player"], 2.0),
-                    ("text", e.pos, "REWRITTEN", COLOURS["player"]), ("shake", 0.25)]
+                    ("text", e.pos, "OVERRIDDEN", COLOURS["player"]), ("shake", 0.25)]
         self.sounds.append("hack")
-        return "REWRITTEN"
+        return "OVERRIDDEN"
 
     def _overloads(self):
         for e in list(self.enemies):
-            if e.side == "seven" and not e.dead and self.time >= e.turned_until:
+            if e.side == "player" and not e.dead and self.time >= e.turned_until:
                 self.overload(e)
 
     def overload(self, e):
@@ -508,7 +529,7 @@ class Room:
             if o.last_attacker is e:
                 o.last_attacker = None
             if o.foe is e:
-                o.foe = None if o.side == "seven" else self.player
+                o.foe = None if o.side == "player" else self.player
                 if o.foe is None:
                     o.choose_foe()
                 if o.foe is None:

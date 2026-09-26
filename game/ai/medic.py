@@ -8,7 +8,7 @@ Combat states:
     FLEE      you're within 4 tiles: it runs for the spot furthest from you
     TAG ALONG nothing to do: it stays near the squad, away from you
 
-A rewritten Mender heals SEVEN's side, including Seven.
+An overridden Mender heals the player's side, including the player.
 
 Utility:  flee     you're within 4 tiles:               1.0
           heal     the most-hurt ally:                   0.35 + 0.65 x (1 - its health)
@@ -46,7 +46,7 @@ class Medic(Enemy):
         return {"heal": (HEAL,), "shelter": (SHELTER,), "flee": (FLEE,), "tag": (TAG,)}[action]
 
     def allies(self):
-        """Its own side (for a rewritten medic, that includes Seven)."""
+        """Its own side (for a rewritten medic, that includes the player)."""
         out = [e for e in self.room.enemies if e is not self and not e.dead and e.side == self.side]
         if self.turned and self.player.hp > 0:
             out.append(self.player)

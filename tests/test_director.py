@@ -1,4 +1,4 @@
-"""ARGUS the director: it models Seven's habits and deploys countermeasures between rooms."""
+"""ARGUS the director: it models the player's habits and deploys countermeasures between rooms."""
 
 import math
 import random
@@ -40,7 +40,7 @@ def test_rewriting_its_units_brings_firewalls():
     assert any(shielded)
 
 
-def test_a_nearly_dead_seven_gets_mercy():
+def test_a_nearly_dead_player_gets_mercy():
     d = Director()
     hurt = Player(pos=(1, 1))
     hurt.hp = 2

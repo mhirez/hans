@@ -30,6 +30,11 @@ _fonts: dict = {}
 _glows: dict = {}
 
 
+def reset():
+    """Forget cached fonts (they die with pygame.quit(); a new Game starts fresh)."""
+    _fonts.clear()
+
+
 def font(size: int, family: str = UI, bold: bool = False) -> pygame.font.Font:
     key = (size, family, bold)
     if key not in _fonts:

@@ -32,7 +32,7 @@ def make_bot(reaction: float = 0.55, dodge: float = 2.5, wobble: float = 0.5, da
              rewrites: bool = True, band: tuple[float, float] = (4.5, 7.5)):
     """reaction: how far into a telegraph (0..1) it notices it; dodge: how close a bullet must be
     before it sidesteps; wobble: aim error in tiles; dash_bullets: dashes through last-moment
-    bullets; rewrites: uses Seven's rewrite; band: the distance it keeps from the nearest enemy."""
+    bullets; rewrites: uses the player's rewrite; band: the distance it keeps from the nearest enemy."""
     def play(run):
         return _bot(run, reaction, dodge, wobble, dash_bullets, rewrites, band)
     return play
@@ -44,7 +44,7 @@ def bot(run):
 
 def _rewrite_target(room):
     p = room.player
-    if p.charges <= 0 or any(e.side == "seven" for e in room.enemies):
+    if p.charges <= 0 or any(e.side == "player" for e in room.enemies):
         return None
     candidates = [e for e in room.enemies if room.rewritable(e) == ""]
     argus = [e for e in room.enemies if e.side == "argus"]

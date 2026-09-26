@@ -12,7 +12,7 @@ class Bullet:
     vel: Point
     radius: float
     damage: float
-    side: str                        # "argus" (hurts Seven's side) or "seven" (hurts ARGUS's)
+    side: str                        # "argus" (hurts the player's side) or "player" (hurts ARGUS's)
     owner: object = None
     pierce: int = 0
     bounce: int = 0

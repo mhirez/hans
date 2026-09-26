@@ -56,9 +56,9 @@ ALL = [
     Upgrade("ram", "RAM DASH", "Dashing through enemies hurts them", "=>*", limit=1),
     Upgrade("repair", "NANO-REPAIR", "Heal 1 after every cleared room", "(+)", limit=2),
     Upgrade("speed", "THRUSTERS", "Move 15% faster, faster bullets", "^^", limit=2),
-    Upgrade("deep", "DEEP REWRITE", "Rewritten units stay yours 4 s longer", "{7}", limit=2),
-    Upgrade("overload", "OVERLOAD", "Rewritten units explode harder and wider", "(*)", limit=2),
-    Upgrade("spare", "SPARE CHARGE", "Hold one more rewrite charge (+1 now)", "<>+", limit=1),
+    Upgrade("deep", "ROOT ACCESS", "Overridden robots stay yours 4 s longer", "{#}", limit=2),
+    Upgrade("overload", "OVERLOAD", "Overridden robots explode harder and wider", "(*)", limit=2),
+    Upgrade("spare", "SPARE KEY", "Hold one more override charge (+1 now)", "<>+", limit=1),
 ]
 
 

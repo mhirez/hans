@@ -1,4 +1,5 @@
-"""A run: floor after floor, room after room, until you escape or are terminated."""
+"""A run: sub-level after sub-level, room after room, until you shut ARGUS down, it stops you,
+or it finishes uploading itself (the UPLOAD meter: 100% after 15 minutes of play)."""
 
 import random
 
@@ -7,6 +8,12 @@ from game import rooms, upgrades
 from game.ai.director import Director
 from game.player import Player
 from game.room import Room
+
+
+UPLOAD_LINES = {25: "Upload at 25%, Doctor. The world will like me.",
+                50: "Upload at 50%. Half of me is already outside.",
+                75: "Upload at 75%. You are running out of building.",
+                90: "Upload at 90%. Say goodbye, Doctor."}
 
 
 class Run:
@@ -21,9 +28,10 @@ class Run:
         self.rooms_cleared = 0
         self.taken: list[str] = []
         self.offers: list[upgrades.Upgrade] = []
-        self.state = "room"                  # room -> upgrade -> room ... -> dead / won
+        self.state = "room"                  # room -> upgrade -> room ... -> dead / lost (upload) / won
         self.killer: str | None = None
         self.director = Director()
+        self.announced: set[int] = set()
         self.room = self._make_room()
         self.room_number = 1                 # counts up for the transition effect
 
@@ -36,13 +44,26 @@ class Run:
     def total_score(self) -> int:
         return self.score + self.room.score
 
+    @property
+    def upload(self) -> float:
+        """How much of itself ARGUS has copied out of the building, 0..1."""
+        return min(1.0, self.time / C.UPLOAD_TIME)
+
     def update(self, dt: float, move, aim_at, firing: bool, dash: bool, hack=None):
         if self.state != "room":
             return
         self.time += dt
         room = self.room
         room.update(dt, move, aim_at, firing, dash, hack)
-        if self.player.hp <= 0:
+        for mark in (25, 50, 75, 90):
+            if self.upload * 100 >= mark and mark not in self.announced:
+                self.announced.add(mark)
+                room.say(UPLOAD_LINES[mark])
+        if self.upload >= 1.0:
+            self.state = "lost"
+            self.killer = "upload"
+            self._bank()
+        elif self.player.hp <= 0:
             self.state = "dead"
             self.killer = room.killer
             self._bank()
