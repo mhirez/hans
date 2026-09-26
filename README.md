@@ -27,7 +27,8 @@ python main.py
 | Esc / P | pause |
 | M · F11 | mute · full screen |
 
-Options: `--floor 3` (start on the Warden's floor), `--xray` (AI View on), `--seed 42`, `--no-sound`.
+Options: `--boss` (straight to the Warden), `--floor 3` (start on a later floor), `--xray` (AI View on),
+`--seed 42`, `--no-sound`.
 
 **How it plays.** Clear a room and the exit opens. Four rooms make a floor; the last is a
 LOCKDOWN (two waves). After each floor you pick one of three upgrades. At the end of floor 3 the

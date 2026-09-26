@@ -9,11 +9,11 @@ from game.room import Room
 
 
 class Run:
-    def __init__(self, seed: int | None = None, start_floor: int = 1):
+    def __init__(self, seed: int | None = None, start_floor: int = 1, start_room: int = 1):
         self.rng = random.Random(seed)
         self.player = Player(pos=rooms.START)
         self.floor = start_floor
-        self.index = 0
+        self.index = max(0, min(C.ROOMS_PER_FLOOR, start_room) - 1)
         self.score = 0
         self.kills = 0
         self.time = 0.0

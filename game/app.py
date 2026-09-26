@@ -27,7 +27,7 @@ def _icon() -> pygame.Surface:
 
 
 class Game:
-    def __init__(self, seed: int | None = None, start_floor: int = 1, xray: bool = False,
+    def __init__(self, seed: int | None = None, start_floor: int = 1, start_room: int = 1, xray: bool = False,
                  save_path: Path | None = DEFAULT_PATH, sound: bool = True):
         pygame.init()
         pygame.display.set_caption(TITLE)
@@ -43,6 +43,7 @@ class Game:
         self.seed = seed
         self.rng = random.Random(seed)
         self.start_floor = start_floor
+        self.start_room = start_room
         self.renderer = Renderer()
         self.screens = Screens()
         self.fx = FX()
@@ -69,7 +70,7 @@ class Game:
 
     def new_run(self):
         seed = self.rng.randrange(10 ** 9) if self.seed is None else self.seed
-        self.run = Run(seed, self.start_floor)
+        self.run = Run(seed, self.start_floor, self.start_room)
         self.seen_room = None
         self.new_best = False
         self.fx.clear()

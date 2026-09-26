@@ -71,6 +71,11 @@ def test_a_floor_ends_with_an_upgrade_choice():
         assert run.player.stats.fire_rate > rate
 
 
+def test_starting_at_the_boss():
+    run = Run(seed=1, start_floor=3, start_room=4)
+    assert run.room.plan.kind == "boss" and run.room.boss is not None
+
+
 def test_upgrade_offers_respect_limits():
     p = Player(pos=(1, 1))
     offers = upgrades.offer(random.Random(0), ["ram"], p)
