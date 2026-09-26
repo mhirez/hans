@@ -1,6 +1,6 @@
 """The game's screens, run by the same StateMachine class that runs the enemies.
 
-    TITLE -> PLAY -> OVER -> PLAY (again) ...
+    TITLE -> STORY (first time only) -> PLAY -> OVER -> PLAY (again) ...
 """
 
 import math
@@ -8,12 +8,15 @@ import math
 import pygame
 
 from game.ai.state_machine import State
+from game.ui.cards import STORY as STORY_CARDS
 
 ENTER = (pygame.K_RETURN, pygame.K_KP_ENTER)
 SOUNDS = {"kick": "kick", "ko": "ko", "hurt": "hurt", "tangled": "whoosh", "throw": "whoosh",
           "scientist:swing": "whoosh", "bark": "bark", "dog:growl": "growl", "shout": "hmm", "crunch": "crunch",
           "heal": "bell", "power": "fanfare", "wave_clear": "fanfare", "game_over": "caught", "door": "creak",
-          "slurp": "slurp"}
+          "slurp": "slurp", "vonosten:protect": "whoosh", "vonosten:shoo": "hmm", "scientist:grappled": "kick",
+          "pfungst:grappled": "kick", "pfungst:swing": "whoosh", "pfungst:surprised": "bell", "pfungst:bluffed": "caught",
+          "vonosten:distract": "hmm", "pfungst:arrive": "creak"}
 
 
 def pressed(event, *keys) -> bool:
@@ -31,7 +34,7 @@ class Title(Scene):
     def on_event(self, game, event) -> bool:
         if pressed(event, *ENTER, pygame.K_SPACE):
             game.new_match()
-            game.scenes.change(PLAY)
+            game.scenes.change(PLAY if game.story_seen else STORY)
         elif pressed(event, pygame.K_h):
             game.help_open = True
         elif pressed(event, pygame.K_ESCAPE):
@@ -42,6 +45,30 @@ class Title(Scene):
 
     def draw(self, game, surface):
         game.cards.title(surface, game.best.score, game.best.wave)
+
+
+class Story(Scene):
+    """Three silent-film intertitles: who Hans is, why red means danger, who is coming."""
+    name = "STORY"
+
+    def enter(self, game):
+        game.story_page = 0
+
+    def on_event(self, game, event) -> bool:
+        if pressed(event, *ENTER, pygame.K_SPACE):
+            game.story_page += 1
+            if game.story_page >= len(STORY_CARDS):
+                game.story_seen = True
+                game.scenes.change(PLAY)
+        elif pressed(event, pygame.K_ESCAPE):
+            game.story_seen = True
+            game.scenes.change(PLAY)
+        else:
+            return False
+        return True
+
+    def draw(self, game, surface):
+        game.cards.story(surface, game.story_page)
 
 
 class Play(Scene):
@@ -92,6 +119,10 @@ class Play(Scene):
             return True
         if event.key == pygame.K_SPACE:
             game.kick_queued = True
+        elif event.key == pygame.K_e:
+            game.match.order_distract()
+        elif event.key == pygame.K_q:
+            game.match.toggle_stay()
         elif event.key in (pygame.K_p, pygame.K_ESCAPE):
             game.paused = True
         else:
@@ -102,12 +133,13 @@ class Play(Scene):
         m = game.match
         banner = None
         if m.state == "cleared":
-            banner = (f"WAVE {m.wave.number} CLEARED", "The Commission studies how you played...",
+            banner = (f"WAVE {m.wave.number} CLEARED", m.notebook_line() or "The Commission studies how you played...",
                       m.lessons[0] if m.lessons else "")
         elif m.state == "playing" and m.clock < 3.4:
             first, second = m.wave.intro
             if m.wave.number == 1:
-                banner = ("WAVE 1", first, "ARROWS run    SHIFT gallop    SPACE kick")
+                banner = ("WAVE 1", "Red = Hans reading their tells. See red, move!",
+                          "ARROWS run    SHIFT gallop    SPACE kick    E von Osten")
             else:
                 banner = (f"WAVE {m.wave.number}", first,
                           f"The Commission learned: {m.lessons[0]}" if m.lessons else second)
@@ -134,4 +166,4 @@ class Over(Scene):
         game.cards.game_over(surface, game.match, game.best.score, game.new_best)
 
 
-TITLE, PLAY, OVER = Title(), Play(), Over()
+TITLE, STORY, PLAY, OVER = Title(), Story(), Play(), Over()

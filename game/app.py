@@ -45,6 +45,8 @@ class Game:
         self.kick_queued = False
         self.step_phase = 0
         self.scripted = None           # tests: a function(match) -> (move, gallop, kick)
+        self.story_seen = False        # the silent-film intro plays before the first game only
+        self.story_page = 0
         self.running = True
         self.scenes = StateMachine(self, TITLE_SCENE)
 

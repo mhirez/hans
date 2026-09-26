@@ -15,16 +15,18 @@ def test_title_to_play_with_xray_pause_and_bot():
 
     def on_frame(g, n):
         seen.add(g.scenes.name)
-        if n == 2:
+        if n in (2, 4, 6, 8):                 # title, then the three story cards
             key(pygame.K_RETURN)
+        if n == 60:
+            key(pygame.K_e)                    # von Osten: go and distract someone
         if n == 200:
             key(pygame.K_p)
         if n == 205:
             key(pygame.K_p)
 
     game.run(max_frames=900, fixed_dt=1 / 60, on_frame=on_frame)
-    assert {"TITLE", "PLAY"} <= seen and not game.paused
-    assert game.match.clock > 10
+    assert {"TITLE", "STORY", "PLAY"} <= seen and not game.paused
+    assert game.story_seen and game.match.clock > 10
 
 
 def test_sound_synthesis_never_breaks_the_game():

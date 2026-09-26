@@ -7,6 +7,7 @@ Shared states (each enemy type adds its own attack states on top):
                                                            (dogs) finds fresh hoofprints -> TRACK
     GUARD        (the Commission's GUARD tactic) stands    notices Hans -> decides
                  watch beside a carrot
+    DISTRACTED   von Osten is arguing with him             after a while -> decides
     (in these three calm states a glimpse of Hans makes him stop and turn to look: a "double take",
      shown as "?", until he's sure (-> decides) or the glimpse fades)
     INVESTIGATE  walks (A*) to a noise, looks around       notices Hans -> decides;  done -> WANDER
@@ -215,6 +216,24 @@ class Guard(State):
         return e.investigate(event)
 
 
+class Distracted(State):
+    """Von Osten has buttonholed him about the scientific method. He can't get away."""
+    name = "DISTRACTED"
+
+    def enter(self, e):
+        e.path = []
+        e.timer = 0.0
+        e.events.append("distracted")
+
+    def update(self, e, dt):
+        e.timer += dt
+        if e.distracted_by is not None:
+            e.face(e.distracted_by.pos, dt)
+        if e.timer > 3.5:
+            e.distracted_by = None
+            e.act(force=True)
+
+
 class KnockedOut(State):
     name = "KO"
 
@@ -228,8 +247,8 @@ class KnockedOut(State):
             e.gone = True
 
 
-WANDER, INVESTIGATE, SEARCH, STUNNED, FLEE, HEAL, GUARD, KO = (Wander(), Investigate(), Search(), Stunned(),
-                                                               Flee(), Heal(), Guard(), KnockedOut())
+WANDER, INVESTIGATE, SEARCH, STUNNED, FLEE, HEAL, GUARD, DISTRACTED, KO = (
+    Wander(), Investigate(), Search(), Stunned(), Flee(), Heal(), Guard(), Distracted(), KnockedOut())
 
 
 class Enemy(Walker):
@@ -269,6 +288,8 @@ class Enemy(Walker):
         self.post = None
         self.sweep: list[Point] = []
         self.chase_mode = None             # "flank" / "intercept" while chasing, for barks
+        self.role: str | None = None       # given by the Commission's field command (tactics.py)
+        self.distracted_by = None
         self.gone = False
         self.world = None
         self.events: list[str] = []
@@ -293,6 +314,10 @@ class Enemy(Walker):
             return "stars"
         if self.state == "TRACK":
             return "nose"
+        if self.state == "DISTRACTED":
+            return "talk"
+        if self.state == "OFF-BALANCE":
+            return "?!"
         if self.state == "FLEE":
             return "!!"
         if self.state == "HEAL":
@@ -457,9 +482,21 @@ class Enemy(Walker):
         a = angle_to(from_point, self.pos)
         self.knockback = (math.cos(a) * KICK_KNOCKBACK / 0.3, math.sin(a) * KICK_KNOCKBACK / 0.3)
         self.hp -= 1
-        self.events.append("hit")
+        self.events.append("hit" if self.hp > 0 else "ko")
         self.fsm.change(KO if self.hp <= 0 else STUNNED)
         return self.hp <= 0
+
+    def distract(self, by):
+        if self.state not in ("KO", "STUNNED"):
+            self.distracted_by = by
+            self.fsm.change(DISTRACTED)
+
+    def grappled(self):
+        """Von Osten grabbed his net mid-swing."""
+        if self.state != "KO":
+            self.events.append("grappled")
+            self.fsm.change(STUNNED)
+            self.stun = 1.2
 
     def knock_out(self):
         if self.state != "KO":

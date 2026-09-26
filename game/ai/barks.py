@@ -13,7 +13,9 @@ from dataclasses import dataclass
 BARK_COOLDOWN = 3.0
 MAX_BUBBLES = 3
 BUBBLE_TIME = 1.9
-URGENT = {"spotted", "flee", "kicked", "wary", "cover", "guard", "morale"}
+URGENT = {"spotted", "flee", "kicked", "wary", "cover", "guard", "morale", "protect", "shoo", "warn", "distract",
+          "read", "predicted", "surprised", "bluff", "bluffed", "arrive", "ko", "blocker", "tired_hans", "weak", "stay", "follow",
+          "grappled"}
 
 LINES = {
     "scientist": {
@@ -31,6 +33,37 @@ LINES = {
         "wary": ["Not this time!", "Ha! Missed me!"],
         "guard": ["I'll watch the carrots.", "Nobody touches these."],
         "sweep": ["Check behind the hay!", "He's hiding somewhere..."],
+        "distracted": ["Sir, please! This is science!", "Herr von Osten, really..."],
+        "grappled": ["Let go of my net!", "Unhand it, sir!"],
+        "tired_hans": ["He's tiring! Now!", "He's out of breath!"],
+        "weak": ["He's hurt! Press him!", "One more and we have him!"],
+        "blocker": ["He's after that carrot!", "I'll guard that carrot!"],
+        "cutoff": ["I'll cut him off!", "Block his way out!"],
+    },
+    "pfungst": {
+        "arrive": ["Gentlemen, positions!"],
+        "spotted": ["There you are, Hans.", "Let us observe."],
+        "read": ["You always dodge the same way.", "I know your next move.", "Predictable, Hans."],
+        "predicted": ["As predicted!", "Just as I wrote."],
+        "surprised": ["...Remarkable.", "Interesting! Noted.", "He learns!"],
+        "bluff": ["Hmm... too easy.", "You read my chalk, Hans?", "Let us try something."],
+        "bluffed": ["You read my X. I read you.", "He knows that I know!", "Second-order, Hans."],
+        "note": ["Noted.", "Fascinating.", "I see..."],
+        "kicked": ["Ouch! Noted.", "A data point!"],
+        "heal": ["Coffee aids thinking."],
+        "lost": ["Where has he gone?"],
+        "ko": ["Remarkable... he reads us."],
+        "hear": ["Hm?"],
+    },
+    "vonosten": {
+        "protect": ["Unhand my horse!", "Leave him alone!"],
+        "point": ["Hans! Over there!", "Look, Hans!"],
+        "warn": ["Behind you, Hans!", "Watch out, Hans!"],
+        "shoo": ["Down, boy!", "Sit! Bad dog!", "Heel!"],
+        "distract": ["Gentlemen, a word!", "Science can wait!"],
+        "stay": ["I'll wait here, Hans."],
+        "follow": ["Coming, Hans!"],
+        "nobody": ["There's nobody to distract!"],
     },
     "stableboy": {
         "spotted": ["Oi! Horse!", "Found him!"],
@@ -46,6 +79,10 @@ LINES = {
         "wary": ["Missed!", "Too slow!"],
         "guard": ["I'll mind the carrots."],
         "sweep": ["Check the hay!"],
+        "distracted": ["Mister, I'm working!"],
+        "grappled": ["Hey!"],
+        "tired_hans": ["He's tired!"],
+        "weak": ["He's hurt!"],
     },
     "dog": {
         "spotted": ["Woof!", "WOOF!", "Woof woof!"],

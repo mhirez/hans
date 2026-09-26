@@ -175,7 +175,7 @@ def _side(facing: float) -> int:
 def scientist(surface, feet, facing: float, walk_phase=0.0, moving=False, index=0, windup=0.0):
     """A scientist of the Commission: long coat, bowler hat, butterfly net. windup 0..1 raises the net."""
     x, y = feet
-    coat = SCIENTIST_COATS[index % len(SCIENTIST_COATS)]
+    coat = (38, 62, 46) if index == 99 else SCIENTIST_COATS[index % len(SCIENTIST_COATS)]   # 99: Pfungst
     swing = math.sin(walk_phase) * 3 if moving else 0
     side = _side(facing)
     pygame.draw.line(surface, T.INK, (x - 4, y - 14), (x - 4 + swing, y), 3)

@@ -3,7 +3,8 @@
     naive    runs straight at the nearest carrot and kicks whenever something is close
     player   plays like a sensible human: dodges net swings, lassos and pounces it can see
              coming (the wind-ups), steps in to kick during a wind-up, gallops away when crowded,
-             and goes for sugar and golden horseshoes
+             and goes for sugar and golden horseshoes. Against Pfungst it reads his chalk X and
+             usually dodges the other way (sometimes straight back), which is what he learns to bluff
 
     python -m tools.autoplay             20 games per bot
     python -m tools.autoplay 50          50 games per bot
@@ -17,6 +18,8 @@ import sys
 from game.config import KICK_RADIUS, NET_REACH, HEARTS
 from game.level import distance, angle_to
 from game.match import Match
+
+HUNCH = random.Random(7)          # the player bot's own coin flips (kept apart from the game's rng)
 
 
 def naive(m: Match):
@@ -56,6 +59,13 @@ def player(m: Match):
             move = [math.cos(a) * 2 + move[0] * 0.3, math.sin(a) * 2 + move[1] * 0.3]
             if d <= KICK_RADIUS:
                 kick = True
+        elif e.state == "READ" and not e.swung and e.pred_spot is not None:
+            away = angle_to(e.pred_spot, h.pos)                  # read Pfungst's chalk X: go the other way
+            if HUNCH.random() < 0.02:
+                e.bot_back = not getattr(e, "bot_back", False)   # now and then, change the plan
+            a = angle_to(e.pos, h.pos) if getattr(e, "bot_back", False) else away
+            move = [math.cos(a) * 2, math.sin(a) * 2]
+            gallop = True
         elif e.state == "THROW" and d < 8:
             a = angle_to(e.pos, h.pos) + math.pi / 2             # sidestep the lasso
             move = [math.cos(a) * 1.5 + move[0] * 0.5, math.sin(a) * 1.5 + move[1] * 0.5]
@@ -67,25 +77,37 @@ def player(m: Match):
     return tuple(move), gallop, kick
 
 
-def play(bot, seed: int, limit: float = 360.0) -> tuple[int, int, float]:
+def play(bot, seed: int, limit: float = 360.0, tally: dict | None = None) -> tuple[int, int, float]:
     m = Match(random.Random(seed))
+    HUNCH.seed(seed)
     t, dt = 0.0, 1 / 30
     while m.state != "over" and t < limit:
         move, gallop, kick = bot(m)
         m.update(dt, move, gallop, kick)
-        m.drain_events()
+        for ev in m.drain_events():
+            if tally is not None and ev.startswith("pfungst:"):
+                tally[ev[8:]] = tally.get(ev[8:], 0) + 1
         t += dt
+    if tally is not None and m.state == "over" and m.caught_by is not None:
+        key = f"caught by {m.caught_by.kind}"
+        tally[key] = tally.get(key, 0) + 1
     return m.wave.number, m.score, t
 
 
 def report(games: int):
     print("| bot | waves reached (median) | best | died in wave 1 | avg score |")
     print("|---|---|---|---|---|")
+    tallies = {}
     for name, bot in (("naive", naive), ("player", player)):
-        runs = [play(bot, s) for s in range(games)]
+        tally = tallies[name] = {}
+        runs = [play(bot, s, tally=tally) for s in range(games)]
         waves = [r[0] for r in runs]
         print(f"| {name} | {statistics.median(waves)} | {max(waves)} | {sum(w == 1 for w in waves)}/{games} | "
               f"{statistics.mean(r[1] for r in runs):.0f} |")
+    for name, tally in tallies.items():
+        keys = ("arrive", "predicted", "bluff", "bluffed", "surprised", "grappled", "ko")
+        print(f"\n{name}: Pfungst " + ", ".join(f"{k} {tally.get(k, 0)}" for k in keys))
+        print(f"{name}: " + ", ".join(f"{k} {v}" for k, v in sorted(tally.items()) if k.startswith("caught")))
 
 
 if __name__ == "__main__":

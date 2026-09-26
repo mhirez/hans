@@ -94,23 +94,37 @@ class Scientist(Enemy):
         return CHASE
 
     def chase_target(self):
-        """Where to run: at Hans, ahead of him (INTERCEPT), or round the far side (pincer)."""
+        """Where to run: his role from the Commission, else at Hans (or ahead of him: INTERCEPT)."""
         hans = self.world.hans
         target = hans.pos if self.sees_hans else self.last_seen
-        mode = None
+        tactics = getattr(self.world, "tactics", None)
+        role = None
+        if tactics is not None:
+            spot, role = tactics.target_for(self, self.world)
+            if spot is not None:
+                return spot, role
         d = distance(self.pos, hans.pos)
-        partners = [e for e in self.world.enemies if e is not self and e.kind == "scientist" and
-                    e.state in ("CHASE", "SWING") and distance(e.pos, hans.pos) < d]
-        if partners and d > 2.2:
-            p = min(partners, key=lambda e: distance(e.pos, hans.pos))
-            a = angle_to(p.pos, hans.pos)                     # from my partner, through Hans...
-            flank = (hans.pos[0] + math.cos(a) * 1.8, hans.pos[1] + math.sin(a) * 1.8)   # ...out the far side
-            if self.level.walkable(int(flank[0]), int(flank[1])):
+        if (role == "flanker" or tactics is None) and d > 2.2:
+            flank = self.flank_point()
+            if flank is not None:
                 return flank, "flank"
         if self.tactic("intercept") and self.sees_hans and d > 2.0:
             vx, vy = self.world.hans_velocity
             look = min(1.2, d / (self.run_speed * self.scale))
             ahead = (hans.pos[0] + vx * look, hans.pos[1] + vy * look)
             if self.level.walkable(int(ahead[0]), int(ahead[1])):
-                target, mode = ahead, "intercept"
-        return target, mode
+                return ahead, "intercept"
+        return target, None
+
+    def flank_point(self):
+        """The far side of Hans from the colleague who's already closer (the pincer)."""
+        hans = self.world.hans
+        d = distance(self.pos, hans.pos)
+        partners = [e for e in self.world.enemies if e is not self and e.kind in ("scientist", "pfungst") and
+                    e.state in ("CHASE", "SWING", "READ") and distance(e.pos, hans.pos) < d]
+        if not partners:
+            return None
+        p = min(partners, key=lambda e: distance(e.pos, hans.pos))
+        a = angle_to(p.pos, hans.pos)
+        flank = (hans.pos[0] + math.cos(a) * 1.8, hans.pos[1] + math.sin(a) * 1.8)
+        return flank if self.level.walkable(int(flank[0]), int(flank[1])) else None

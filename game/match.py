@@ -13,6 +13,10 @@ from game.config import (KICK_RADIUS, KICK_NOISE, CARROTS_ON_FIELD, ITEM_RADIUS,
                          MORALE_PER_KO, WARY_HOP)
 from game.ai.barks import Barks
 from game.ai.commission import Commission
+from game.ai.pfungst import Pfungst
+from game.ai.playermodel import PlayerModel
+from game.ai.tactics import Tactics
+from game.ai.vonosten import VonOsten
 from game.ai.dog import Dog
 from game.ai.enemy import Enemy
 from game.ai.perception import Noise
@@ -23,11 +27,20 @@ from game.entities.hans import Hans
 from game.level import Point, center, distance, angle_to, tile_of
 from game.waves import plan
 
-KINDS = {"scientist": Scientist, "stableboy": StableBoy, "dog": Dog}
+KINDS = {"scientist": Scientist, "stableboy": StableBoy, "dog": Dog, "pfungst": Pfungst}
+BOSS_EVERY = 5
+BOSS_POINTS = 200
+WINDUPS = {"windup", "growl", "spin"}          # an attack is being wound up...
+RELEASES = {"swing", "bark", "throw"}          # ...and let go: which way did Hans dodge?
 BARK_TRIGGERS = {"spotted": "spotted", "hit": "kicked", "windup": "windup", "growl": "growl", "hear": "hear",
                  "lost": "lost", "gave_up": "gave_up", "heal": "heal", "flee": "flee", "morale": "morale",
                  "cover": "cover", "throw": "throw", "sniff": "sniff", "flank": "flank", "intercept": "intercept",
-                 "wary": "wary", "guard": "guard", "sweep": "sweep"}
+                 "wary": "wary", "guard": "guard", "sweep": "sweep", "distracted": "distracted",
+                 "grappled": "grappled", "tired_hans": "tired_hans", "weak": "weak", "blocker": "blocker",
+                 "cutoff": "cutoff", "arrive": "arrive", "read": "read", "predicted": "predicted",
+                 "surprised": "surprised", "note": "note", "ko": "ko", "bluff": "bluff", "bluffed": "bluffed",
+                 "protect": "protect", "shoo": "shoo", "point": "point", "warn": "warn", "distract": "distract",
+                 "stay": "stay", "follow": "follow", "nobody": "nobody"}
 SPOT_SHOUT = {"dog": 12.0}               # a bark carries further than a shout
 SHOUT_RADIUS = 7.0
 
@@ -78,7 +91,10 @@ class Match:
         self._uid = 0
         self._seen_horseshoe = False
         self.commission = Commission()          # watches how you play; persists across waves
+        self.model = PlayerModel()               # how you dodge: what Pfungst reads
+        self.tactics = Tactics()                 # the Commission's field command: goals and roles
         self.barks = Barks(rng)
+        self.caught_by = None
         self.lessons: list[str] = []            # what the Commission learned before this wave
         self.start_wave(start_wave)
 
@@ -99,6 +115,12 @@ class Match:
         self.guard_posted = False
         self.barks.bubbles = []
         self.queue = list(self.wave.enemies)
+        if n % BOSS_EVERY == 0:
+            self.queue = sorted(self.queue + [(3.0, "pfungst")])
+        self.tactics = Tactics()
+        sx, sy = self.level.start
+        spot = (sx - 1.5, sy + 1.0) if self.level.walkable(int(sx - 1.5), int(sy + 1.0)) else self.level.start
+        self.vonosten = VonOsten(self.level, spot)
         self.clock = 0.0
         self.carrots = 0
         self.state = "playing"
@@ -133,6 +155,7 @@ class Match:
         self.hans_velocity = ((self.hans.pos[0] - before[0]) / dt, (self.hans.pos[1] - before[1]) / dt) if dt else (0, 0)
         self._hoofprints(dt)
         self.commission.watch(self, dt)
+        self.tactics.update(self, dt)
         if kick:
             self.kick()
 
@@ -144,8 +167,14 @@ class Match:
             e.update(dt, self)
             for ev in e.drain_events():
                 self.events.append(f"{e.kind}:{ev}")
+                self._learn_from(e, ev)
                 if ev in BARK_TRIGGERS:
                     self.barks.say(e, BARK_TRIGGERS[ev])
+        self.vonosten.update(dt, self)
+        for ev in self.vonosten.drain_events():
+            self.events.append(f"vonosten:{ev}")
+            if ev in BARK_TRIGGERS:
+                self.barks.say(self.vonosten, BARK_TRIGGERS[ev])
         self._separate()
         for noise in noises:
             for e in self.enemies:
@@ -179,6 +208,8 @@ class Match:
         self.hans.start_kick()
         self.events.append("kick")
         self.commission.saw_kick()
+        live = [distance(e.pos, self.hans.pos) for e in self.enemies if e.state != "KO"]
+        self.model.saw_kick(min(live) if live else None)
         hits = 0
         for e in self.enemies:
             if e.state != "KO" and distance(e.pos, self.hans.pos) <= KICK_RADIUS:
@@ -196,10 +227,13 @@ class Match:
         return hits
 
     def _knocked_out(self, e: Enemy):
-        self.score += KO_POINTS
+        points = BOSS_POINTS if e.kind == "pfungst" else KO_POINTS
+        self.score += points
         self.knockouts += 1
         self.morale = max(0.2, self.morale - MORALE_PER_KO)
-        self.popups.append(Popup(f"+{KO_POINTS}", e.pos))
+        self.popups.append(Popup(f"+{points}", e.pos))
+        if e.kind == "pfungst":
+            self.say("You beat Oskar Pfungst! (for now...)")
         self.events.append("ko")
 
     def _golden_touch(self):
@@ -213,6 +247,7 @@ class Match:
     # --- what the enemies call -----------------------------------------------------------
     def hit_hans(self, enemy: Enemy, how: str):
         if self.hans.hurt():
+            self.caught_by = enemy
             self.events.append("hurt")
             a = angle_to(enemy.pos, self.hans.pos)
             self.hans.knock = (math.cos(a) * 6, math.sin(a) * 6)
@@ -324,6 +359,33 @@ class Match:
                 self.hans.power_up()
                 self.events.append("power")
                 self.say("GOLDEN HANS! Now they run from you!")
+
+    # --- learning about the player -------------------------------------------------------
+    def _learn_from(self, e: Enemy, ev: str):
+        """Feed wind-ups and releases to the player model; Pfungst notes each dodge."""
+        if ev in WINDUPS:
+            self.model.attack_started(e, self.hans.pos)
+        elif ev in RELEASES:
+            side = self.model.attack_released(e, self.hans.pos)
+            if side and self.tactics.commander is not None and self.tactics.commander is not e:
+                self.tactics.commander.events.append("note")
+
+    def notebook_line(self) -> str:
+        """Pfungst's notebook: what the player model says about how you dodge."""
+        seen = sum(self.model.dodges.values()) - len(self.model.dodges)
+        if seen < 3:
+            return ""
+        side, p = self.model.predict()
+        words = {"left": "dodge LEFT", "right": "dodge RIGHT", "back": "back AWAY", "in": "step IN to kick"}
+        return f"Pfungst's notebook: when attacked, you {words[side]} {p:.0%} of the time."
+
+    # --- commands to von Osten -----------------------------------------------------------
+    def order_distract(self) -> bool:
+        return self.state == "playing" and self.vonosten.order_distract()
+
+    def toggle_stay(self):
+        if self.state == "playing":
+            self.vonosten.toggle_stay()
 
     def _hoofprints(self, dt: float):
         for p in self.prints:

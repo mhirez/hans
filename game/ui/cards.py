@@ -12,8 +12,21 @@ HELP = [
     ("Goal", "eat the carrots to clear each wave. You have 3 hearts"),
     ("Red warning", "a net swing, a pounce or a lasso is coming. Get out of the way!"),
     ("Pick-ups", "sugar cube = a heart back.   golden horseshoe = they run from YOU"),
+    ("von Osten", "your owner helps by himself.   E: argue with a scientist   Q: wait / follow"),
+    ("Pfungst", "every 5th wave. He marks where he thinks you'll dodge with a chalk X"),
 ]
 KEYS = "P pause     X AI X-Ray     M mute     F11 full screen"
+
+# Silent-film intertitles shown before the first game. Each: (heading, lines).
+STORY = [
+    ("BERLIN, 1904", ["Clever Hans can count, spell and tell the time.", "Or so they say."]),
+    ("HIS REAL GIFT", ["Hans reads people: a glance, a lean, a held breath.",
+                       "In this game the RED warnings are Hans reading their tells.",
+                       "When you see red, move."]),
+    ("THE COMMISSION", ["Thirteen experts want his secret, and they learn as they chase.",
+                        "His owner, Wilhelm von Osten, will stand by him.",
+                        "And Oskar Pfungst is coming to read Hans back."]),
+]
 
 
 class Cards:
@@ -89,13 +102,32 @@ class Cards:
         for i, line in enumerate(["P or Enter   carry on", "R   start again", "Q   back to the title"]):
             th.text(surface, line, th.type(17, bold=i == 0), T.INK, (WIDTH // 2, card.y + 110 + i * 32), "midtop")
 
+    def story(self, surface, page: int):
+        th = self.theme
+        heading, lines = STORY[page]
+        self._film_card(surface)
+        th.spaced(surface, heading, th.display(54, bold=True), T.FILM_TEXT, (WIDTH // 2, 150), 10, "midtop")
+        th.rule(surface, WIDTH // 2 - 200, WIDTH // 2 + 200, 250, T.FILM_TEXT)
+        for i, line in enumerate(lines):
+            th.text(surface, line, th.serif(30, italic=True), T.FILM_TEXT, (WIDTH // 2, 320 + i * 52), "center")
+        dots = "   ".join("o" if i == page else "." for i in range(len(STORY)))
+        th.text(surface, dots, th.type(18, bold=True), T.INK_FAINT, (WIDTH // 2, 560), "center")
+        self._prompt(surface, "ENTER  next" if page < len(STORY) - 1 else "ENTER  run, Hans!", 604, 24)
+        th.text(surface, "Esc  skip", th.type(14), T.INK_FAINT, (WIDTH // 2, 646), "center")
+        th.film_overlay(surface)
+
     def game_over(self, surface, match, best_score: int, new_best: bool):
         th = self.theme
         card = pygame.Rect(WIDTH // 2 - 340, 110, 680, 480)
         self._overlay_card(surface, card)
         th.spaced(surface, "CAUGHT!", th.display(48, bold=True), T.RED, (WIDTH // 2, card.y + 36), 6, "midtop")
-        th.text(surface, "The Commission finally has its clever horse.", th.serif(22, italic=True), T.INK,
-                (WIDTH // 2, card.y + 124), "center")
+        by = getattr(match.caught_by, "kind", None)
+        line = ("Pfungst read you, just as he read Hans in 1907." if by == "pfungst"
+                else "The Commission finally has its clever horse.")
+        th.text(surface, line, th.serif(22, italic=True), T.INK, (WIDTH // 2, card.y + 124), "center")
+        note = match.notebook_line()
+        if note:
+            th.text(surface, note, th.serif(16, italic=True), T.INK_SOFT, (WIDTH // 2, card.y + 152), "center")
         th.text(surface, f"{match.score}", th.display(64, bold=True), T.INK, (WIDTH // 2, card.y + 196), "center")
         th.text(surface, "NEW BEST!" if new_best else f"best {best_score}", th.serif(20, bold=new_best),
                 T.GREEN if new_best else T.INK_SOFT, (WIDTH // 2, card.y + 248), "center")

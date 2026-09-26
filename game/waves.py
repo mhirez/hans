@@ -12,7 +12,7 @@ SCRIPTED = {
     2: ["scientist", "scientist", "scientist"],
     3: ["scientist", "scientist", "stableboy"],
     4: ["scientist", "stableboy", "dog", "dog", "dog"],
-    5: ["scientist", "scientist", "stableboy", "stableboy", "dog", "dog", "dog"],
+    5: ["scientist", "scientist", "stableboy", "dog", "dog"],        # + Oskar Pfungst (match.py)
 }
 
 INTROS = {
@@ -20,7 +20,7 @@ INTROS = {
     2: ("More scientists.", "Watch for the red arc: that's a net swing coming."),
     3: ("A stable boy with a lasso!", "He throws from far away. A lasso slows you down."),
     4: ("Guard dogs!", "They hunt as a pack and surround you. Keep moving!"),
-    5: ("Everyone at once.", "Golden horseshoes make them run from YOU."),
+    5: ("Oskar Pfungst arrives!", "He studies how you dodge, and swings where you'll go. Surprise him."),
 }
 
 
@@ -49,5 +49,6 @@ def plan(n: int, rng: random.Random) -> Wave:
     for i, kind in enumerate(kinds):
         times.append((t, kind))
         t += 8.0 if n == 1 else 1.0 if i < 2 else rng.uniform(3.0, 5.5)   # wave 1: one at a time
-    intro = INTROS.get(n, (f"Wave {n}.", f"{len(kinds)} of them. They're getting quicker."))
+    intro = INTROS.get(n, ("Pfungst is back.", "He remembers every dodge you've made.") if n % 5 == 0 else
+                       (f"Wave {n}.", f"{len(kinds)} of them. They're getting quicker."))
     return Wave(n, tuple(times), min(24, 5 + 2 * n), min(1.35, 0.82 + 0.06 * (n - 1)), intro)
