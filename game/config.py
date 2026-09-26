@@ -27,6 +27,8 @@ KICK_KNOCKBACK = 2.4
 GALLOP_NOISE = 6.0                       # enemies within this many tiles hear a galloping hoof-fall
 KICK_NOISE = 5.0
 CRUNCH_NOISE = 4.5                       # eating a carrot isn't quiet either
+MORALE_PER_KO = 0.18                     # each knockout in a wave shakes the others' nerve
+WARY_HOP = 1.3                           # WARY tactic: how far they hop back from a kick
 POWER_TIME = 6.0                         # golden horseshoe
 
 # --- Enemies (shared) ----------------------------------------------------------------
@@ -70,7 +72,10 @@ DOG_POUNCE_SPEED = 10.0
 DOG_POUNCE_DISTANCE = 3.0
 DOG_RETREAT_TIME = 1.2
 DOG_SMELL = 5.5                          # dogs find Hans by smell: no line of sight needed
-DOG_TRACKING = 0.6                       # chance a wandering dog heads along Hans's scent
+PRINT_EVERY = 0.45                       # Hans leaves a hoofprint every this many tiles
+PRINT_LIFE = 14.0                        # prints fade away after this long
+PRINT_FRESH = 11.0                       # a dog will pick up prints younger than this
+PRINT_SNIFF = 3.0                        # ...within this many tiles
 
 # --- Items ---------------------------------------------------------------------------
 CARROTS_ON_FIELD = 3

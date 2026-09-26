@@ -59,6 +59,7 @@ class Throw(State):
             vx, vy = b.world.hans_velocity
             aim = (hans.pos[0] + vx * lead, hans.pos[1] + vy * lead)
             b.world.throw_lasso(b, aim)
+            b.events.append("throw")
             b.reload = LASSO_RELOAD
             b.fsm.change(POSITION)
 
@@ -71,6 +72,7 @@ class Cover(State):
     name = "COVER"
 
     def enter(self, b):
+        b.events.append("cover")
         b.find_cover()
 
     def update(self, b, dt):

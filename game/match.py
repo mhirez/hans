@@ -9,7 +9,10 @@ import random
 
 from game.config import (KICK_RADIUS, KICK_NOISE, CARROTS_ON_FIELD, ITEM_RADIUS, SUGAR_EVERY, HORSESHOE_EVERY,
                          COFFEE_EVERY, COFFEE_HEAL, CARROT_POINTS, KO_POINTS, WAVE_BONUS, LASSO_SPEED, LASSO_RANGE,
-                         LASSO_SPREAD, DOG_RING, ENEMY_RADIUS, CRUNCH_NOISE)
+                         LASSO_SPREAD, DOG_RING, ENEMY_RADIUS, CRUNCH_NOISE, PRINT_EVERY, PRINT_LIFE,
+                         MORALE_PER_KO, WARY_HOP)
+from game.ai.barks import Barks
+from game.ai.commission import Commission
 from game.ai.dog import Dog
 from game.ai.enemy import Enemy
 from game.ai.perception import Noise
@@ -21,6 +24,10 @@ from game.level import Point, center, distance, angle_to, tile_of
 from game.waves import plan
 
 KINDS = {"scientist": Scientist, "stableboy": StableBoy, "dog": Dog}
+BARK_TRIGGERS = {"spotted": "spotted", "hit": "kicked", "windup": "windup", "growl": "growl", "hear": "hear",
+                 "lost": "lost", "gave_up": "gave_up", "heal": "heal", "flee": "flee", "morale": "morale",
+                 "cover": "cover", "throw": "throw", "sniff": "sniff", "flank": "flank", "intercept": "intercept",
+                 "wary": "wary", "guard": "guard", "sweep": "sweep"}
 SPOT_SHOUT = {"dog": 12.0}               # a bark carries further than a shout
 SHOUT_RADIUS = 7.0
 
@@ -39,6 +46,13 @@ class Lasso:
     pos: Point
     vel: tuple[float, float]
     travelled: float = 0.0
+
+
+@dataclass
+class Print:
+    pos: Point
+    facing: int
+    age: float = 0.0
 
 
 @dataclass
@@ -63,6 +77,9 @@ class Match:
         self.hans_velocity = (0.0, 0.0)
         self._uid = 0
         self._seen_horseshoe = False
+        self.commission = Commission()          # watches how you play; persists across waves
+        self.barks = Barks(rng)
+        self.lessons: list[str] = []            # what the Commission learned before this wave
         self.start_wave(start_wave)
 
     # --- waves ---------------------------------------------------------------------------
@@ -76,6 +93,11 @@ class Match:
         self.enemies: list[Enemy] = []
         self.items: list[Item] = []
         self.lassos: list[Lasso] = []
+        self.prints: list[Print] = []
+        self._last_print = self.level.start
+        self.morale = 1.0
+        self.guard_posted = False
+        self.barks.bubbles = []
         self.queue = list(self.wave.enemies)
         self.clock = 0.0
         self.carrots = 0
@@ -93,6 +115,7 @@ class Match:
     # --- the frame -----------------------------------------------------------------------
     def update(self, dt: float, move: tuple[float, float], gallop: bool, kick: bool):
         self.toast_time = max(0.0, self.toast_time - dt)
+        self.barks.update(dt)
         for p in self.popups:
             p.age += dt
         self.popups = [p for p in self.popups if p.age < 1.0]
@@ -108,6 +131,8 @@ class Match:
         before = self.hans.pos
         noises = self.hans.update(dt, move, gallop, self.level)
         self.hans_velocity = ((self.hans.pos[0] - before[0]) / dt, (self.hans.pos[1] - before[1]) / dt) if dt else (0, 0)
+        self._hoofprints(dt)
+        self.commission.watch(self, dt)
         if kick:
             self.kick()
 
@@ -119,6 +144,8 @@ class Match:
             e.update(dt, self)
             for ev in e.drain_events():
                 self.events.append(f"{e.kind}:{ev}")
+                if ev in BARK_TRIGGERS:
+                    self.barks.say(e, BARK_TRIGGERS[ev])
         self._separate()
         for noise in noises:
             for e in self.enemies:
@@ -142,6 +169,7 @@ class Match:
             self.state, self.state_time = "cleared", 0.0
             self.events.append("wave_clear")
             self.say(f"Wave {self.wave.number} cleared!  +{bonus}")
+            self.lessons = self.commission.learn()
 
     # --- Hans's actions ------------------------------------------------------------------
     def kick(self) -> int:
@@ -150,12 +178,18 @@ class Match:
             return 0
         self.hans.start_kick()
         self.events.append("kick")
+        self.commission.saw_kick()
         hits = 0
         for e in self.enemies:
             if e.state != "KO" and distance(e.pos, self.hans.pos) <= KICK_RADIUS:
                 hits += 1
                 if e.kicked(self.hans.pos):
                     self._knocked_out(e)
+            elif self.commission.has("wary") and e.aware and e.state not in ("KO", "STUNNED") and \
+                    distance(e.pos, self.hans.pos) <= KICK_RADIUS + 1.5:
+                a = angle_to(self.hans.pos, e.pos)           # WARY: they've learned to hop back
+                e.knockback = (math.cos(a) * WARY_HOP / 0.3, math.sin(a) * WARY_HOP / 0.3)
+                e.events.append("wary")
         noise = Noise(self.hans.pos, KICK_NOISE)
         for e in self.enemies:
             e.hear(noise)
@@ -164,6 +198,7 @@ class Match:
     def _knocked_out(self, e: Enemy):
         self.score += KO_POINTS
         self.knockouts += 1
+        self.morale = max(0.2, self.morale - MORALE_PER_KO)
         self.popups.append(Popup(f"+{KO_POINTS}", e.pos))
         self.events.append("ko")
 
@@ -232,7 +267,10 @@ class Match:
         e = KINDS[kind](self.level, self.level.waypoints[gate], self.next_uid(), self.rng, self.wave.speed)
         e.world = self
         e.target = self.hans.pos                 # they come in having heard where he is
-        e.fsm.handle(("noise", self.hans.pos))
+        if self.commission.has("guard") and not self.guard_posted and kind != "dog":
+            e.guard = self.guard_posted = True   # GUARD: this one goes to stand over the carrots
+        else:
+            e.fsm.handle(("noise", self.hans.pos))
         self.enemies.append(e)
         self.events.append("door")
 
@@ -269,6 +307,7 @@ class Match:
                 continue
             self.items.remove(item)
             if item.kind == "carrot":
+                self.commission.saw_carrot(self, item.pos)
                 self.carrots += 1
                 self.carrots_total += 1
                 self.score += CARROT_POINTS
@@ -285,6 +324,14 @@ class Match:
                 self.hans.power_up()
                 self.events.append("power")
                 self.say("GOLDEN HANS! Now they run from you!")
+
+    def _hoofprints(self, dt: float):
+        for p in self.prints:
+            p.age += dt
+        self.prints = [p for p in self.prints if p.age < PRINT_LIFE]
+        if distance(self.hans.pos, self._last_print) >= PRINT_EVERY:
+            self._last_print = self.hans.pos
+            self.prints.append(Print(self.hans.pos, self.hans.facing))
 
     def _top_up_carrots(self):
         """Keep enough carrots on the field to finish the wave (retries if a spawn ever fails)."""

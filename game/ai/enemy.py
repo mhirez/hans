@@ -4,11 +4,15 @@ Shared states (each enemy type adds its own attack states on top):
 
     WANDER       strolls between random spots             notices Hans -> decides (desire.py)
                                                            hears a noise -> INVESTIGATE
+                                                           (dogs) finds fresh hoofprints -> TRACK
+    GUARD        (the Commission's GUARD tactic) stands    notices Hans -> decides
+                 watch beside a carrot
     (in these three calm states a glimpse of Hans makes him stop and turn to look: a "double take",
      shown as "?", until he's sure (-> decides) or the glimpse fades)
     INVESTIGATE  walks (A*) to a noise, looks around       notices Hans -> decides;  done -> WANDER
     SEARCH       lost Hans: goes to where he last saw      finds him -> decides;  gives up -> WANDER
-                 him and looks around
+                 him and looks around (with the SWEEP
+                 tactic: then checks behind nearby hay)
     STUNNED      knocked flying by a kick, seeing stars    recovers -> decides (knows where Hans is)
     FLEE         runs to the spot furthest from Hans       the reason passes -> decides
     HEAL         walks (A*) to a coffee cup he has SEEN    drinks (+1 health) -> decides
@@ -17,6 +21,9 @@ Shared states (each enemy type adds its own attack states on top):
 "Decides" means: score attack / flee / heal / cover with desire.py and switch to the winner.
 While attacking, every enemy re-decides twice a second, so a scientist you've kicked once
 can break off his chase to go and drink a coffee he noticed.
+
+State changes also post events ("lost", "heal", "flank"...) that barks.py turns into speech
+bubbles, so the player can see each decision being made.
 """
 
 import math
@@ -47,6 +54,11 @@ class Wander(State):
             return
         if e.double_take(dt):
             return
+        if e.guard:
+            e.fsm.change(GUARD)
+            return
+        if e.follow_trail():
+            return
         if e.pause > 0:
             e.pause -= dt
             e.turn_toward(e.look_base + math.sin(e.pause * 3) * 0.8, dt)
@@ -64,6 +76,7 @@ class Investigate(State):
     name = "INVESTIGATE"
 
     def enter(self, e):
+        e.events.append("hear")
         e.looking = 0.0 if not e.go_to(e.target) else -1.0
 
     def update(self, e, dt):
@@ -79,7 +92,7 @@ class Investigate(State):
         e.looking += dt
         e.turn_toward(e.look_base + math.sin(e.looking * 2.5) * 1.8, dt)
         if e.looking > SEARCH_TIME:
-            e.fsm.change(WANDER)
+            e.give_up()
 
     def on_event(self, e, event) -> bool:
         return e.investigate(event)
@@ -91,6 +104,8 @@ class Search(State):
     def enter(self, e):
         e.aware = False
         e.target = e.last_seen or e.pos
+        e.events.append("lost")
+        e.sweep = e.hiding_spots(e.target) if e.tactic("sweep") else []
         e.looking = 0.0 if not e.go_to(e.target) else -1.0
 
     def update(self, e, dt):
@@ -105,8 +120,12 @@ class Search(State):
             return
         e.looking += dt
         e.turn_toward(e.look_base + math.sin(e.looking * 2.5) * 1.8, dt)
-        if e.looking > SEARCH_TIME:
-            e.fsm.change(WANDER)
+        if e.sweep and e.looking > 1.0:            # SWEEP: next hiding place behind the hay
+            if e.looking < 1.1:
+                e.events.append("sweep")
+            e.looking = 0.0 if not e.go_to(e.sweep.pop(0)) else -1.0
+        elif e.looking > SEARCH_TIME:
+            e.give_up()
 
     def on_event(self, e, event) -> bool:
         return e.investigate(event)
@@ -133,6 +152,7 @@ class Flee(State):
 
     def enter(self, e):
         e.timer = 0.0
+        e.events.append("flee" if e.world.hans.powered or getattr(e.world, "morale", 1.0) > 0.75 else "morale")
         e.pick_escape()
 
     def update(self, e, dt):
@@ -151,6 +171,7 @@ class Heal(State):
     def enter(self, e):
         cup = e.known_coffee(e.world)
         e.cup = cup
+        e.events.append("heal")
         if cup is None or not e.go_to(cup.pos):
             e.act(force=True)
 
@@ -166,6 +187,34 @@ class Heal(State):
         e.every(dt, lambda: e.decide() != "heal" and e.act())
 
 
+class Guard(State):
+    """The GUARD tactic: stand beside a carrot, lantern-sweeping the approach, until Hans shows up."""
+    name = "GUARD"
+
+    def enter(self, e):
+        e.events.append("guard")
+        e.post = None
+
+    def update(self, e, dt):
+        if e.aware:
+            e.act()
+            return
+        if e.double_take(dt):
+            return
+        carrots = [i for i in e.world.items if i.kind == "carrot"]
+        if not carrots:
+            return
+        carrot = min(carrots, key=lambda c: distance(c.pos, e.pos))
+        if e.post is None or distance(e.post, carrot.pos) > 2.0:
+            e.post = e.guard_post(carrot.pos)
+            e.go_to(e.post)
+        if e.walk(dt, e.run_speed * e.scale * 0.8):
+            e.turn_toward(angle_to(carrot.pos, e.pos) + math.sin(e.fsm.time_in_state * 0.9) * 1.3, dt)
+
+    def on_event(self, e, event) -> bool:
+        return e.investigate(event)
+
+
 class KnockedOut(State):
     name = "KO"
 
@@ -179,9 +228,8 @@ class KnockedOut(State):
             e.gone = True
 
 
-WANDER, INVESTIGATE, SEARCH, STUNNED, FLEE, HEAL, KO = (Wander(), Investigate(), Search(), Stunned(), Flee(),
-                                                        Heal(), KnockedOut())
-CALM_STATES = ("WANDER", "INVESTIGATE", "SEARCH")
+WANDER, INVESTIGATE, SEARCH, STUNNED, FLEE, HEAL, GUARD, KO = (Wander(), Investigate(), Search(), Stunned(),
+                                                               Flee(), Heal(), Guard(), KnockedOut())
 
 
 class Enemy(Walker):
@@ -217,6 +265,10 @@ class Enemy(Walker):
         self.scores: dict[str, float] = {}
         self.known_cups: set[int] = set()
         self.cup = None
+        self.guard = False                 # the Commission's GUARD tactic picked him
+        self.post = None
+        self.sweep: list[Point] = []
+        self.chase_mode = None             # "flank" / "intercept" while chasing, for barks
         self.gone = False
         self.world = None
         self.events: list[str] = []
@@ -239,6 +291,8 @@ class Enemy(Walker):
             return "?"
         if self.state == "STUNNED":
             return "stars"
+        if self.state == "TRACK":
+            return "nose"
         if self.state == "FLEE":
             return "!!"
         if self.state == "HEAL":
@@ -328,6 +382,40 @@ class Enemy(Walker):
             self.fsm.change(SEARCH)
             return True
         return False
+
+    def tactic(self, name: str) -> bool:
+        commission = getattr(self.world, "commission", None)
+        return commission is not None and commission.has(name)
+
+    def give_up(self):
+        self.events.append("gave_up")
+        self.fsm.change(GUARD if self.guard else WANDER)
+
+    def follow_trail(self) -> bool:
+        """Dogs override this to track hoofprints."""
+        return False
+
+    def hiding_spots(self, around: Point) -> list[Point]:
+        """SWEEP: open tiles tucked behind tall cover near where Hans vanished, nearest first."""
+        spots = []
+        c0, r0 = int(around[0]), int(around[1])
+        for r in range(r0 - 4, r0 + 5):
+            for c in range(c0 - 4, c0 + 5):
+                if not self.level.walkable(c, r):
+                    continue
+                p = center((c, r))
+                beside_cover = any(self.level.at(c + dc, r + dr) in "hc" for dc in (-1, 0, 1) for dr in (-1, 0, 1))
+                if beside_cover and not self.level.line_of_sight(around, p):
+                    spots.append(p)
+        spots.sort(key=lambda p: distance(p, around))
+        return spots[:3]
+
+    def guard_post(self, carrot: Point) -> Point:
+        for dc, dr in ((1, 1), (-1, 1), (1, -1), (-1, -1), (1, 0), (-1, 0)):
+            c, r = int(carrot[0]) + dc, int(carrot[1]) + dr
+            if self.level.walkable(c, r):
+                return center((c, r))
+        return carrot
 
     def investigate(self, event) -> bool:
         kind, pos = event

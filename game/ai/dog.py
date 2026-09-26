@@ -6,15 +6,17 @@
     RETREAT   backs off for a moment                                                   -> SURROUND
 
 So the pack closes in from several sides at once, and you have to keep moving or kick.
-Dogs have a third sense: SMELL. Within DOG_SMELL tiles they find Hans even behind a hay bale,
-and a wandering dog usually heads off along his scent. They never go for coffee.
+Dogs have a third sense: SMELL. Within DOG_SMELL tiles they find Hans even behind a hay bale.
+Further away they TRACK him: Hans leaves hoofprints, and a dog that finds fresh ones follows
+the trail from print to fresher print, nose down, until the scent is strong enough to spot him.
+They never go for coffee.
 """
 
 import math
 
 from game.config import (DOG_HP, DOG_WANDER, DOG_RUN, DOG_POUNCE_WINDUP, DOG_POUNCE_SPEED,
-                         DOG_POUNCE_DISTANCE, DOG_RETREAT_TIME, REPLAN_TIME, DOG_SMELL, DOG_TRACKING)
-from game.ai.enemy import Enemy
+                         DOG_POUNCE_DISTANCE, DOG_RETREAT_TIME, REPLAN_TIME, DOG_SMELL, PRINT_SNIFF, PRINT_FRESH)
+from game.ai.enemy import Enemy, WANDER as WANDER_STATE
 from game.ai.state_machine import State
 from game.level import distance, angle_to
 
@@ -101,7 +103,30 @@ class Retreat(State):
             d.act(force=True)
 
 
-SURROUND, POUNCE, RETREAT = Surround(), Pounce(), Retreat()
+class Track(State):
+    """Nose to the ground: follow the hoofprints toward fresher and fresher ones."""
+    name = "TRACK"
+
+    def enter(self, d):
+        d.events.append("sniff")
+        d.scent_age = 99.0
+
+    def update(self, d, dt):
+        if d.aware:
+            d.act()
+            return
+        prints = [p for p in d.world.prints if distance(p.pos, d.pos) <= PRINT_SNIFF and p.age < d.scent_age]
+        if prints:
+            nxt = min(prints, key=lambda p: p.age)             # the freshest print in reach
+            d.scent_age = nxt.age
+            d.trail_to = nxt.pos
+        if d.trail_to is None or d.steer(d.trail_to, dt, d.wander_speed * d.scale * 1.3):
+            if not prints:
+                d.trail_to = None
+                d.fsm.change(WANDER_STATE)
+
+
+SURROUND, POUNCE, RETREAT, TRACK = Surround(), Pounce(), Retreat(), Track()
 
 
 class Dog(Enemy):
@@ -119,6 +144,8 @@ class Dog(Enemy):
         self.slot = self.pos
         self.leap = None
         self.leaped = 0.0
+        self.trail_to = None
+        self.scent_age = 99.0
 
     def attack_state(self):
         return SURROUND
@@ -130,12 +157,9 @@ class Dog(Enemy):
             self.last_seen, self.unseen = hans.pos, 0.0
             self.spot()
 
-    def pick_wander_spot(self):
-        """Nose to the ground: usually wander toward where the horse's scent comes from."""
-        if self.world is not None and self.rng.random() < DOG_TRACKING:
-            hx, hy = self.world.hans.pos
-            for _ in range(10):
-                c, r = int(hx) + self.rng.randint(-4, 4), int(hy) + self.rng.randint(-4, 4)
-                if self.level.walkable(c, r) and self.go_to((c + 0.5, r + 0.5)):
-                    return
-        super().pick_wander_spot()
+    def follow_trail(self) -> bool:
+        """While wandering: any fresh hoofprints nearby? Then start tracking."""
+        if any(distance(p.pos, self.pos) <= PRINT_SNIFF and p.age < PRINT_FRESH for p in self.world.prints):
+            self.fsm.change(TRACK)
+            return True
+        return False

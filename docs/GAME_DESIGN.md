@@ -1,7 +1,7 @@
 # Hans: Game Design Document
 
 *Catch me if you can.*
-AI for Games individual coursework · Python + pygame-ce · v0.4 · 26 Sep 2026
+AI for Games individual coursework · Python + pygame-ce · v0.4.1 · 26 Sep 2026
 **Deadline: Friday 27 November 2026, 3pm** (2–3 min video 50% + 2,000-word report 50%)
 
 > Earlier directions are kept in git: `v0.2-detective` (player as the scientist) and `v0.3-stealth`
@@ -102,6 +102,27 @@ the side they come from; each dog runs to its place → **POUNCE:** crouches (re
 leaps 3 tiles; a bite costs a heart → **RETREAT:** backs off, then circles again. They find Hans by
 smell and track his scent while wandering.
 
+## 3.5 The illusion of intelligence
+
+Lecture 1: *"Game AI is about creating the illusion, or giving the user the impression, that they
+are engaged in gameplay with 'intelligent' opponents."* Clever AI the player never notices is
+wasted, so v0.4.1 makes the thinking visible.
+
+| Feature | What the player sees | What's really happening |
+|---|---|---|
+| **Barks** (`barks.py`) | Speech bubbles: "There he is!", "Where did he go?", "I need a coffee...", "Cut him off!", "sniff sniff" | Every state change posts an event; each enemy type has its own lines, 3 s cooldowns, at most 3 on screen, never covering Hans |
+| **The Commission learns** (`commission.py`) | Between waves: "The Commission learned: you kick a lot. Now they jump back from your hooves." A red label keeps what it has learned on screen | It counts kicks/min, share of time galloping, time lurking by cover, carrots snatched near enemies; the strongest habit over its threshold gets a counter-tactic, remembered all game (max 4) |
+| WARY (vs kicking) | Scientists hop back from a missed kick: "Ha! Missed me!" | Aware enemies within 2.8 tiles are knocked back 1.3 tiles when a kick misses them |
+| INTERCEPT (vs galloping) | "Cut him off!": they run to where you're going | Chase target = Hans + velocity × look-ahead (up to 1.2 s) |
+| SWEEP (vs hiding) | "Check behind the hay!": searchers look behind cover | SEARCH visits up to 3 tiles beside hay/carts that are hidden from where Hans vanished |
+| GUARD (vs greed) | "I'll watch the carrots." | One enemy per wave takes a GUARD state beside the nearest carrot, sweeping the approach |
+| **Pincer** | "I'll go round!": two scientists close in from opposite sides | If a colleague is already chasing and closer, run to the point 1.8 tiles beyond Hans on the far side |
+| **Tracking** | Hoofprints on the ground; dogs follow them nose-down | Prints every 0.45 tiles, fading over 14 s; TRACK steers to the freshest print within 3 tiles, fresher each time |
+| **Morale** | "He's too strong!": the rest start running as you knock them out | Each KO lowers the wave's morale by 0.18; flee desire uses wounds + lost morale |
+| **Double take** | "?" and a turn toward a glimpse | Noticing takes a moment; while it builds, calm enemies stop and face the glimpse |
+
+In the X-Ray, a panel shows the Commission's live habit bars filling toward their thresholds.
+
 ## 4. Waves and procedural generation
 
 - **Courtyards** (`game/arena.py`): each wave places 6–12 hay bales, carts and troughs at random. It keeps a clear ring inside the walls and clear space around the start and the four stable doors. Obstacles never touch each other (no dead ends), and a flood fill proves every tile is reachable; otherwise the layout is re-rolled.
@@ -130,11 +151,12 @@ The bots drove real changes:
 
 | Topic | Where |
 |---|---|
-| Finite state machines | 3 enemy types on one shared FSM core (9–10 states each); game screens use the same class |
+| Finite state machines | 3 enemy types on one shared FSM core (10–11 states each, incl. GUARD, TRACK); game screens use the same class |
 | Desirability / motivations | attack / flee / heal / cover scores, re-evaluated twice a second |
 | Pathfinding | A* for chase, investigate, search, flee, heal, cover; re-planned while chasing |
 | Perception | sight cone + line of sight, noticing, double take, hearing, smell, memory, shouting |
-| Imperfect information | enemies only know what they sense or are told; coffee only if seen; search the last known spot |
+| Imperfect information | enemies only know what they sense or are told; coffee only if seen; search the last known spot; dogs follow a trail |
+| Adaptation | the Commission learns the player's habits and counters them wave by wave |
 | Procedural generation | a fair courtyard every wave; generated waves after 5 |
 
 ## 7. AI X-Ray (X)
@@ -167,17 +189,21 @@ game/audio.py               synthesised sound (no files)
 game/save.py                best score
 game/ui/                    theme, sprites, view (arena, warnings, HUD, X-Ray), cards
 tools/autoplay.py           balancing bots
-tests/                      30 tests
+game/ai/commission.py       learns the player's habits, picks counter-tactics
+game/ai/barks.py            speech bubbles for decisions
+tests/                      39 tests
 ```
 
 ## 9. Video plan (2–3 minutes)
 
 1. **0:00** Title → wave 1: run, eat a carrot, a scientist spots you (? then !), dodge his wind-up, step in and kick.
-2. **0:30** X-Ray on: states and desire scores; kick a scientist once and watch "heal" beat "attack" as he goes for coffee.
-3. **1:00** Wave 3: a stable boy positions, leads his throw; gallop at him and he runs for cover.
-4. **1:25** Wave 4: the dog pack spreads around you (ring slots in the X-Ray), pounces from two sides; one smells you through hay.
-5. **1:50** Golden horseshoe: everyone flips to FLEE.
-6. **2:10** A new wave's courtyard layout; the bot balancing table.
+2. **0:30** Speech bubbles as they notice, lose and search for you; a second scientist says "I'll go round!" and closes the pincer.
+3. **0:45** Kick a lot in wave 1, then read wave 2's banner: the Commission learned it; watch them hop back "Ha! Missed me!".
+4. **1:00** X-Ray on: states, desire scores, the Commission's habit bars; kick a scientist once and watch "heal" beat "attack".
+5. **1:15** Wave 3: a stable boy positions, leads his throw; gallop at him and he runs for cover.
+6. **1:35** Wave 4: a dog follows your hoofprints nose-down, the pack spreads around you and pounces from two sides.
+7. **2:00** Golden horseshoe: everyone flips to FLEE; KO a few and the rest lose their nerve.
+8. **2:20** A new wave's courtyard layout; the bot balancing table.
 
 ## 10. Report plan (2,000 words)
 
@@ -185,9 +211,10 @@ tests/                      30 tests
 |---|---|
 | Concept and why it suits real-time game AI | 150 |
 | The shared FSM core and the state-class pattern | 300 |
-| Perception: sight, noticing, double take, hearing, smell, memory, shouting | 300 |
-| Desirability and decision making | 300 |
-| The three enemy types and their attack states | 350 |
+| Perception: sight, noticing, double take, hearing, smell, tracks, memory, shouting | 250 |
+| Desirability and decision making | 250 |
+| The three enemy types and their attack states | 250 |
+| The illusion of intelligence: barks, the learning Commission, pincers, tracking, morale | 250 |
 | Pathfinding and steering | 150 |
 | Procedural courtyards and waves | 150 |
 | Evaluation: bot balancing and what it changed | 200 |
@@ -197,7 +224,8 @@ tests/                      30 tests
 
 | When | What |
 |---|---|
-| ✅ now | Playable wave game, 3 enemy AIs, X-Ray, bots, 30 tests |
+| ✅ now | Playable wave game, 3 enemy AIs, X-Ray, bots, 39 tests |
+| ✅ now | Illusion of intelligence: barks, learning Commission, pincers, tracking, morale |
 | weeks 1–2 | Play it yourself; tune what feels unfair or dull |
 | optional | A boss (Oskar Pfungst) every 5 waves; a 4th enemy (a goat that steals carrots) |
 | weeks 5–7 | Record the video (§9), write the report (§10) |

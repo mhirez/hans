@@ -16,6 +16,8 @@ from game.ui import sprites, theme as T
 from game.ui.theme import dashed_line
 
 KIND_NAMES = {"scientist": "scientist", "stableboy": "stable boy", "dog": "dog"}
+TACTIC_NAMES = {"wary": "jump back from kicks", "intercept": "cut you off", "sweep": "check behind hay",
+                "guard": "guard the carrots"}
 
 
 class MatchView:
@@ -68,6 +70,7 @@ class MatchView:
         self._prepare(level)
         surface.fill(T.FILM)
         surface.blit(self.ground, self.origin(level))
+        self._prints(surface, match)
         if xray:
             self._cones(surface, match)
         self._items(surface, match, t)
@@ -75,15 +78,29 @@ class MatchView:
         self._figures(surface, match, t)
         self._lassos(surface, match)
         self._effects(surface, match)
+        self._speech(surface, match)
         if xray:
             self._xray(surface, match)
+            self._commission_panel(surface, match)
         self._hud(surface, match, xray)
+        self._learned(surface, match)
         if banner:
             self._banner(surface, *banner)
         self._toast(surface, match)
         self.theme.film_overlay(surface)
 
     # --- things on the ground ----------------------------------------------------------
+    def _prints(self, surface, match):
+        """Hans's hoofprints: fading, and what the dogs follow."""
+        layer = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        for p in match.prints:
+            x, y = self.px(match.level, p.pos)
+            alpha = int(110 * (1 - p.age / 14.0))
+            if alpha <= 0:
+                continue
+            pygame.draw.arc(layer, (90, 66, 40, alpha), (x - 5, y + 6, 10, 9), 0, math.pi, 2)
+        surface.blit(layer, (0, 0))
+
     def _items(self, surface, match, t):
         for item in match.items:
             x, y = self.px(match.level, item.pos)
@@ -137,6 +154,12 @@ class MatchView:
             top = y - 66
             if icon == "stars":
                 sprites.stars(surface, (x, top + 20), t)
+            elif icon == "nose":
+                pygame.draw.circle(surface, T.PAPER, (x, top + 14), 11)
+                pygame.draw.circle(surface, T.INK, (x, top + 14), 11, 2)
+                pygame.draw.ellipse(surface, T.INK, (x - 4, top + 11, 8, 6))
+                for k in (-1, 1):
+                    pygame.draw.arc(surface, T.INK_SOFT, (x + k * 7 - 3, top + 6, 6, 8), 1.2, 5.0, 1)
             elif icon == "cup":
                 pygame.draw.circle(surface, T.PAPER, (x, top), 13)
                 pygame.draw.circle(surface, T.INK, (x, top), 13, 2)
@@ -200,6 +223,70 @@ class MatchView:
             img = font.render(p.text, True, (250, 230, 150))
             img.set_alpha(int(255 * (1 - p.age)))
             surface.blit(img, img.get_rect(center=(x, y - 30 - p.age * 40)))
+
+    def _speech(self, surface, match):
+        """Speech bubbles: every line is a real decision being made, said out loud."""
+        font = self.theme.serif(16, italic=True, bold=True)
+        hx, hy = self.px(match.level, match.hans.pos)
+        hans_box = pygame.Rect(hx - 34, hy - 50, 68, 66)          # never hide the player's horse
+        for b in match.barks.bubbles:
+            e = b.enemy
+            if e not in match.enemies:
+                continue
+            x, y = self.px(match.level, e.pos)
+            img = font.render(b.text, True, T.INK)
+            box = img.get_rect(midbottom=(x + 18, y - 82)).inflate(16, 8)
+            below = box.colliderect(hans_box)
+            if below:
+                box = img.get_rect(midtop=(x + 18, y + 26)).inflate(16, 8)
+            box.clamp_ip(pygame.Rect(4, HUD_H + 4, WIDTH - 8, HEIGHT - HUD_H - 8))
+            fade = 1.0 if b.age < 1.5 else max(0.0, 1 - (b.age - 1.5) / 0.4)
+            panel = pygame.Surface(box.size, pygame.SRCALPHA)
+            pygame.draw.rect(panel, (*T.PAPER, int(240 * fade)), panel.get_rect(), border_radius=8)
+            pygame.draw.rect(panel, (*T.INK, int(255 * fade)), panel.get_rect(), 2, border_radius=8)
+            surface.blit(panel, box.topleft)
+            if fade > 0.3:
+                edge = box.top + 1 if below else box.bottom - 1
+                pygame.draw.polygon(surface, T.INK, [(box.x + 12, edge), (box.x + 22, edge),
+                                                     (x + 4, y + 12 if below else y - 64)])
+            img.set_alpha(int(255 * fade))
+            surface.blit(img, img.get_rect(center=box.center))
+
+    def _learned(self, surface, match):
+        """Always on screen: what the Commission has learned about the way you play."""
+        tactics = match.commission.tactics
+        if not tactics:
+            return
+        th = self.theme
+        text = "The Commission has learned to: " + ",  ".join(TACTIC_NAMES[t] for t in tactics)
+        img = th.serif(15, italic=True, bold=True).render(text, True, T.PAPER)
+        box = img.get_rect(topleft=(12, HUD_H + 8)).inflate(16, 8)
+        panel = pygame.Surface(box.size, pygame.SRCALPHA)
+        panel.fill((120, 30, 20, 200))
+        surface.blit(panel, box.topleft)
+        surface.blit(img, img.get_rect(center=box.center))
+
+    def _commission_panel(self, surface, match):
+        """X-Ray: the Commission's running tally of your habits against its thresholds."""
+        from game.ai.commission import HABITS
+        th = self.theme
+        habits = match.commission.habits
+        box = pygame.Rect(WIDTH - 300, HUD_H + 8, 288, 116)
+        panel = pygame.Surface(box.size, pygame.SRCALPHA)
+        panel.fill((24, 18, 12, 210))
+        surface.blit(panel, box.topleft)
+        th.text(surface, "THE COMMISSION IS WATCHING YOU", th.type(11, bold=True), T.FILM_TEXT, (box.x + 10, box.y + 8))
+        y = box.y + 28
+        labels = {"kicks": "kicks / min", "gallop": "time galloping", "hides": "hiding by hay",
+                  "greedy": "risky carrots"}
+        for habit, (tactic, threshold, _) in HABITS.items():
+            frac = min(1.0, habits.score(habit) / threshold)
+            th.text(surface, labels[habit], th.type(11), T.FILM_TEXT, (box.x + 10, y))
+            bar = pygame.Rect(box.x + 130, y + 2, 100, 9)
+            th.bar(surface, bar, frac, T.RED if frac >= 1 else (226, 176, 50), back=(60, 48, 36))
+            done = "learned" if match.commission.has(tactic) else ""
+            th.text(surface, done, th.type(10, bold=True), T.RED, (box.right - 8, y), "topright")
+            y += 21
 
     # --- X-Ray ---------------------------------------------------------------------------
     def _cones(self, surface, match):

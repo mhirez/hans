@@ -3,7 +3,7 @@
 Every enemy that knows where Hans is scores its options between 0 and ~1.5 and does the best:
 
     attack  = aggression x health            (nobody attacks a golden horse)
-    flee    = 1.3 if Hans is golden, else  cowardice x wounds x how close Hans is
+    flee    = 1.3 if Hans is golden, else  cowardice x (wounds + lost morale) x how close Hans is
     heal    = wounds x how close the nearest coffee he has *seen* is x 2  (not dogs)
     cover   = how hard Hans is galloping at him                           (stable boys only)
 
@@ -20,7 +20,9 @@ def desires(enemy, world) -> dict[str, float]:
     wounds = 1 - health
     d = distance(enemy.pos, hans.pos)
     scores = {"attack": 0.0 if hans.powered else enemy.aggression * (0.4 + 0.6 * health)}
-    scores["flee"] = 1.3 if hans.powered else enemy.cowardice * wounds * max(0.0, 1 - d / 6)
+    morale = getattr(world, "morale", 1.0)          # falls as the wave's enemies get knocked out
+    scores["flee"] = 1.3 if hans.powered else \
+        enemy.cowardice * (wounds + (1 - morale)) * max(0.0, 1 - d / 6)
     if enemy.can_heal:
         cup = enemy.known_coffee(world)
         near = max(0.0, 1 - distance(enemy.pos, cup.pos) / 16) if cup else 0.0

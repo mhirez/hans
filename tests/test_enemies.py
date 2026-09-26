@@ -24,7 +24,7 @@ class World:
         self.level = Level(YARD)
         self.hans = Hans(hans_pos)
         self.hans_velocity = (0.0, 0.0)
-        self.enemies, self.items = [], []
+        self.enemies, self.items, self.prints = [], [], []
         self.hits, self.lassos = [], []
 
     @property

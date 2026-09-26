@@ -102,13 +102,15 @@ class Play(Scene):
         m = game.match
         banner = None
         if m.state == "cleared":
-            banner = (f"WAVE {m.wave.number} CLEARED", "Get ready...", "")
-        elif m.state == "playing" and m.clock < 3.2:
+            banner = (f"WAVE {m.wave.number} CLEARED", "The Commission studies how you played...",
+                      m.lessons[0] if m.lessons else "")
+        elif m.state == "playing" and m.clock < 3.4:
             first, second = m.wave.intro
             if m.wave.number == 1:
                 banner = ("WAVE 1", first, "ARROWS run    SHIFT gallop    SPACE kick")
             else:
-                banner = (f"WAVE {m.wave.number}", first, second)
+                banner = (f"WAVE {m.wave.number}", first,
+                          f"The Commission learned: {m.lessons[0]}" if m.lessons else second)
         game.view.draw(surface, m, game.xray, game.clock_time, banner)
         if game.paused:
             game.cards.pause(surface)
