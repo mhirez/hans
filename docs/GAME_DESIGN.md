@@ -1,331 +1,284 @@
-# Hans: Game Design Document
+# LOCKDOWN: Game Design Document
 
-*Catch me if you can.*
-AI for Games individual coursework · Python + pygame-ce · v0.4.2 · 26 Sep 2026
+AI for Games individual coursework · Python + pygame-ce · v1.0 · 26 Sep 2026
 **Deadline: Friday 27 November 2026, 3pm** (2–3 min video 50% + 2,000-word report 50%)
 
-> Earlier directions are kept in git: `v0.2-detective` (player as the scientist) and `v0.3-stealth`
-> (sneak past lantern guards). Both were too much reading and thinking; v0.4 is pure action.
+> Earlier directions (the Clever Hans games) are kept as git tags `v0.2-detective`,
+> `v0.3-stealth` and `v0.4.2-hans`. Their lesson: the more the AI did *at* the player without the
+> player being able to read it, the more "random" the game felt. LOCKDOWN is built around one rule:
+> **every AI decision must be readable.**
 
 ---
 
 ## 1. Pitch
 
-Clever Hans is the most famous horse in Europe, and everyone wants to catch him. You play Hans
-in a 1904 courtyard: **run, gallop, kick, eat carrots, survive the waves.** Scientists with
-butterfly nets, stable boys with lassos and packs of guard dogs come through the stable doors.
-Each type is its own AI, and each wave there are more of them and they're quicker.
-
-**The story is the mechanic.** The real Hans couldn't count; he *read people*, spotting the tiny
-involuntary cues of whoever asked the question. The psychologist Oskar Pfungst exposed him (1907)
-by reading Hans just as closely. So in the game:
-
-| History | Game |
-|---|---|
-| Hans read people's tells | Every red warning is a tell Hans reads: see red, move |
-| Pfungst studied Hans until he could predict him | Boss every 5th wave: a **player model** of your dodges, a chalk X on his prediction, and **bluffing** if you read his X |
-| Wilhelm von Osten believed in Hans and unknowingly cued him with a nod | Your **AI companion**: protects you, argues with scientists (E), and *nods* toward sugar cubes |
-| The Hans Commission (13 experts, 1904) | The enemies, coordinated by a **tactics blackboard** and learning your habits between waves |
-
-Three silent-film intertitles tell this before the first game (skippable).
+A top-down neon shooter. You are an escaped combat unit breaking out of a facility, one
+single-screen room at a time. The security AI fights like a squad: soldiers take cover and flank,
+hounds ram, snipers reposition, medics heal, and they take turns to attack. At the end, the
+Warden. The brief asks for dynamic AI that copes with imperfect information; every enemy here
+only knows what it has seen, heard or been told.
 
 ## 2. How it plays
 
 | Input | |
 |---|---|
-| Arrows / WASD | run (4.2 tiles/s) |
-| hold Shift | gallop (6.8 tiles/s): drains stamina, and enemies hear it |
-| Space | kick: everyone within 1.3 tiles is knocked back and stunned |
-| E | von Osten argues with the nearest scientist (3.5 s; 12 s cooldown) |
-| Q | von Osten waits here / follows again |
-| P / Esc, X, F1, M, F11 | pause, AI X-Ray, help, mute, full screen |
+| WASD / arrows | move (6 tiles/s, quick acceleration) |
+| Mouse + left click | aim and shoot (6 shots/s) |
+| Space / right click / Shift | dash: 2.5 tiles in 0.13 s, can't be hit, 0.7 s cooldown |
+| Tab / X | AI View |
+| Esc / P, M, F11 | pause, mute, full screen |
 
-- **A wave** is cleared by eating its carrots (7 in wave 1, then 2 more each wave). Up to 3 are on the field at once; eating one makes a crunch that enemies can hear.
-- **3 hearts.** A net, a bite, or being caught loses one; then you blink invulnerable for 1.6 s.
-- **Red warnings** tell you what's coming: a red arc (net swing), a red dashed line (a dog about to leap), a spinning rope (a lasso). Dodge, or step in and kick during the wind-up.
-- **Pick-ups:** sugar cube (+1 heart), golden horseshoe (6 s: you can't be hurt, and everyone flees; touching them knocks them out), coffee (enemies only: +1 health).
-- **Score:** carrot 10, knockout 25, wave cleared 100 × wave number. Best score is saved.
+- **Rooms:** 32 × 18 tiles, one screen. The entry locks behind you; clear every enemy and the exit opens (a green chevron shows the way).
+- **Floors:** 4 rooms. Rooms 1-3 are normal; room 4 is a **LOCKDOWN**: a second wave warps in (red markers, 1.1 s warning) and a supply drop lands between the waves. After each floor: **pick 1 of 3 upgrades** (fire rate, damage, split shot, piercing, ricochet, plating, afterburner, ram dash, nano-repair, thrusters).
+- **Floor 3, room 4:** the Warden. Beat him and walk out: **YOU ESCAPED**.
+- **6 health.** Getting hit gives 0.9 s of invulnerability. Enemies drop repairs sometimes (the medic usually does).
+- **Ambush:** shooting an enemy that hasn't noticed you does double damage.
+- **Score:** kills (100-150, the Warden 2,500), 250 × floor per room cleared, +500 for a room cleared without a hit. The best run is saved.
 
-## 3. The enemies
+## 3. Readability rules (why it doesn't feel random)
 
-### 3.1 Shared brain (`game/ai/enemy.py`)
+1. **One warning language for every attack.** A line or band in the enemy's colour shows *where* the attack will go and *follows* you; a ring closing in shows *when*; for the last 0.25 s it **flashes white and locks**. Learn it once, read every enemy.
+2. **Attack tokens.** Only 2 enemies (3 from floor 2) may attack at once, and never two starting within 0.35 s. You can always see who is about to shoot.
+3. **Few, clear icons.** `?` (suspicious or searching) and `!` (spotted you). No speech bubbles.
+4. **Calm enemies show sight cones**, which go white → yellow → red as they notice you. Alert enemies hide theirs to keep the fight clean.
+5. **Distinct silhouettes and colours:** Sentry ◆ red, Hound ▲ orange, Lens ◇ purple, Mender ✚ green, the Warden ⬢ gold. Enemy bullets are round and warm; yours are cyan streaks.
+6. **Hysteresis in decisions.** An enemy gets +0.12 for continuing what it's doing, and actions like "hide" run for a minimum time, so behaviour never flickers.
+
+## 4. The AI
+
+### 4.1 Architecture (`game/ai/`)
+
+| Piece | File | What it does |
+|---|---|---|
+| State machine | `fsm.py` | "State classes" pattern from the FSM lecture: `enter / update / exit / on_event`, states created once and shared; per-enemy data lives on the enemy. Also runs the game screens. |
+| Senses | `senses.py` | sight cone + exact line of sight, suspicion meter, hearing, memory |
+| Shared brain | `agent.py` | body, movement (A* + path smoothing + steering), reactions, **utility decision loop**, the calm states |
+| Squad tactics | `tactics.py` | attack tokens, flanker slot, tactical tile scoring, danger cost |
+| Enemy types | `grunt.py`, `charger.py`, `sniper.py`, `medic.py`, `warden.py` | combat states and utility functions |
+
+### 4.2 Perception (imperfect information)
+
+- **Sight:** a cone 10 tiles long (13 for the sniper) and 100° wide while calm, 220° once alert. It needs a clear line of sight, tested exactly on the tile grid (Amanatides & Woo traversal), so cover really hides you. Anything within 1.6 tiles is felt regardless.
+- **Noticing:** while calm, seeing you fills a suspicion meter (0.5 s at range, 2.5× faster up close). Partly full: `?`, the enemy stops and stares (a double take). You can still break line of sight. Full: `!`.
+- **Hearing:** gunshots carry 11 tiles. A calm enemy goes to INVESTIGATE the spot; an alert one updates where it thinks you are.
+- **Memory:** last known position + when it was confirmed. After 5 s without contact, an alert enemy SEARCHes: it goes to the spot, looks around and tries two nearby places, then gives up.
+- **Word of mouth:** a spotter shouts; every calm ally within 9 tiles becomes alert and learns where you were.
+- **Being shot:** an enemy that's hit learns where the shot came from.
+
+### 4.3 The shared state machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> WANDER
-    WANDER --> INVESTIGATE: hears a noise
-    WANDER --> Decide: notices Hans
-    INVESTIGATE --> Decide: notices Hans
-    INVESTIGATE --> WANDER: looked, nothing
-    SEARCH --> Decide: finds him again
-    SEARCH --> WANDER: gives up
-    Decide --> Attack: attack wins
-    Decide --> FLEE: flee wins
-    Decide --> HEAL: heal wins
-    Decide --> COVER: cover wins (stable boy)
-    Attack --> SEARCH: lost him for 3 s
-    Attack --> Decide: every 0.5 s
-    FLEE --> Decide: reason passed
-    HEAL --> Decide: drank the coffee
-    Attack --> STUNNED: kicked
-    STUNNED --> Decide: recovered
-    STUNNED --> KO: kicked again (no health left)
+    [*] --> PATROL
+    PATROL --> INVESTIGATE: hears a gunshot
+    INVESTIGATE --> PATROL: nothing there
+    PATROL --> COMBAT: suspicion full ("!") / ally shouts / shot
+    INVESTIGATE --> COMBAT: spots you
+    COMBAT --> SEARCH: no contact for 5 s
+    SEARCH --> COMBAT: spots you
+    SEARCH --> PATROL: gives up
+    COMBAT --> STUNNED: dazed
+    STUNNED --> COMBAT: recovers
 ```
 
-"Attack" is a different sub-machine for each enemy type (below). States are classes on one
-reusable `StateMachine` (`game/ai/state_machine.py`), the "state classes" pattern from the FSM
-lecture, created once and never allocated at run time. The same class runs the game's screens.
+"COMBAT" is each type's own set of states. On entering combat an enemy spends 0.2 s turning
+toward the threat before it decides (a reaction beat that also reads naturally).
 
-**Senses** (`game/ai/perception.py`, `enemy.py`):
-- **Sight:** a cone 7.5 tiles long and 120° wide, needing a clear line of sight. Hay and carts block it; troughs don't.
-- **Noticing:** sight must last a moment (faster when close) before "!". Meanwhile he does a **double take**: stops and turns toward the glimpse, shown as "?".
-- **Hearing:** a gallop carries 6 tiles, a kick 5, a crunching carrot 4.5. An unaware enemy goes to look (INVESTIGATE); an aware one updates where he thinks Hans is.
-- **Smell (dogs):** within 5.5 tiles, through hay.
-- **Memory:** the last place Hans was seen. Out of sight for 3 s, he SEARCHes there.
-- **Word of mouth:** a spotting scientist or stable boy shouts to others within 7 tiles; a bark brings the whole pack within 12.
+### 4.4 Utility decision making
 
-**Desirability** (`game/ai/desire.py`): when aware, each enemy scores its options:
+In combat each enemy re-decides every 0.35 s (and whenever an action finishes):
+
+1. Score every option 0 to ~1 from what it *knows* (never from the true player position unless it can see you).
+2. Add +0.12 to the current action (hysteresis).
+3. Try options best-first; take the first **feasible** one (is there actually a cover spot? is an attack token free?). Feasibility checks also prepare the action: finding the spot, acquiring the token.
+
+**SENTRY** (`grunt.py`), states ENGAGE → AIM → FIRE, STRAFE, REPOSITION, FLANK, TAKE COVER → HIDE:
 
 | option | score |
 |---|---|
-| attack | aggression × (0.4 + 0.6 × health); 0 if Hans is golden |
-| flee | 1.3 if Hans is golden, else cowardice × wounds × closeness |
-| heal | wounds × (0.4 + 0.6 × closeness of the nearest coffee he has *seen*) × 2 |
-| cover | (1.1 − 0.5 × health) if Hans is galloping at him (stable boys only) |
+| shoot | sees you, reloaded, token free: 0.6 + 0.2 × health + 0.2 × in range (2.5-8.5 tiles) |
+| cover | health < 60% or under fire: 0.75 × (1 − health) + 0.35 × under fire (not for 3 s after leaving cover) |
+| strafe | sees you: 0.35 + 0.15 × in range (3-8) |
+| reposition | lost sight but memory fresh: 0.5; sees you but too close / far: 0.45 |
+| flank | no shot, an ally has you in sight, flank slot free, health > 40%: 0.62 |
 
-The best wins, with 0.12 stickiness so they don't dither. It's re-evaluated twice a second, so a
-scientist kicked once will break off a chase for a nearby coffee, and everyone scatters the
-moment Hans turns golden (the lecture's Pac-Man EVADE).
+"Under fire" is 1 just after being hit *or* after one of your bullets passes within 0.8 tiles
+(suppression), fading over 1.5 s. The AIM telegraph lasts 0.6 s; the burst is 3 rounds fanned
+±5° down the locked line.
 
-### 3.2 Scientist: butterfly net (`scientist.py`)
+**HOUND** (`charger.py`), states STALK, CIRCLE, WINDUP → CHARGE → RECOVER / DAZED:
+charge 0.9 (sees you, 2-7 tiles, token, recovered) · stalk 0.6 (no sight or > 7 tiles) · circle
+0.4 (waiting its turn at ~4.5 tiles). The charge line is ray-cast: if it ends at a wall, the hound
+slams in and is dazed for 1.6 s taking double damage (the telegraph shows an impact marker).
 
-**CHASE:** A* to Hans (or his last known spot), re-planned every 0.25 s → **SWING:** stops, winds
-up (the red arc), swings. It hits if Hans is still within 1.6 tiles and in front of him. The net
-outreaches the kick (1.3), so you must either dodge the wind-up or step in and kick during it.
+**LENS** (`sniper.py`), states POSITION, AIM, EVADE: evade 0.95 (you within 4.5) · shoot 0.9
+(sees you, 4+ tiles, token) · position 0.5. The laser tracks for 0.8 s, locks for 0.25 s, is
+ray-cast so it stops at walls, and the lens moves to a new perch (3+ tiles away) after each shot.
 
-### 3.3 Stable boy: lasso (`stableboy.py`)
+**MENDER** (`medic.py`), states HEAL, SHELTER, FLEE, TAG ALONG: flee 1.0 (you within 4) ·
+heal 0.35 + 0.65 × (1 − health of the most hurt ally) · shelter 0.45 (you can see it; it stands
+behind its nearest ally, on the far side from you) · tag along 0.25. Heals 1.2 health/s within
+3.5 tiles with line of sight.
 
-**POSITION:** scores ~30 tiles near Hans (ideal 3.5–6.5 tiles away, clear line of sight, short
-walk) and goes to the best → **THROW:** spins the rope, then throws where Hans *will be* (leading
-the target by his velocity, with a little human error). A hit tangles Hans for 1.8 s at half speed
-→ reload → POSITION. **COVER:** if Hans gallops at him, he runs to the nearest tile Hans can't see.
+### 4.5 Tactical positioning (`tactics.py`)
 
-### 3.4 Guard dog: pack (`dog.py`)
+Tiles within 6-9 tiles are scored for a purpose; the best wins and is **claimed** (claimed
+tiles and their neighbours score −2 for everyone else, so the squad spreads out). Every
+evaluation is kept for the AI View heat map.
 
-**SURROUND:** the pack shares out a ring 2.4 tiles around Hans, evenly spaced and starting from
-the side they come from; each dog runs to its place → **POUNCE:** crouches (red dashed line),
-leaps 3 tiles; a bite costs a heart → **RETREAT:** backs off, then circles again. They find Hans by
-smell and track his scent while wandering.
-
-## 3.5 The illusion of intelligence
-
-Lecture 1: *"Game AI is about creating the illusion, or giving the user the impression, that they
-are engaged in gameplay with 'intelligent' opponents."* Clever AI the player never notices is
-wasted, so v0.4.1 makes the thinking visible.
-
-| Feature | What the player sees | What's really happening |
+| spot | must | scores higher for |
 |---|---|---|
-| **Barks** (`barks.py`) | Speech bubbles: "There he is!", "Where did he go?", "I need a coffee...", "Cut him off!", "sniff sniff" | Every state change posts an event; each enemy type has its own lines, 3 s cooldowns, at most 3 on screen, never covering Hans |
-| **The Commission learns** (`commission.py`) | Between waves: "The Commission learned: you kick a lot. Now they jump back from your hooves." A red label keeps what it has learned on screen | It counts kicks/min, share of time galloping, time lurking by cover, carrots snatched near enemies; the strongest habit over its threshold gets a counter-tactic, remembered all game (max 4) |
-| WARY (vs kicking) | Scientists hop back from a missed kick: "Ha! Missed me!" | Aware enemies within 2.8 tiles are knocked back 1.3 tiles when a kick misses them |
-| INTERCEPT (vs galloping) | "Cut him off!": they run to where you're going | Chase target = Hans + velocity × look-ahead (up to 1.2 s) |
-| SWEEP (vs hiding) | "Check behind the hay!": searchers look behind cover | SEARCH visits up to 3 tiles beside hay/carts that are hidden from where Hans vanished |
-| GUARD (vs greed) | "I'll watch the carrots." | One enemy per wave takes a GUARD state beside the nearest carrot, sweeping the approach |
-| **Pincer** | "I'll go round!": two scientists close in from opposite sides | If a colleague is already chasing and closer, run to the point 1.8 tiles beyond Hans on the far side |
-| **Tracking** | Hoofprints on the ground; dogs follow them nose-down | Prints every 0.45 tiles, fading over 14 s; TRACK steers to the freshest print within 3 tiles, fresher each time |
-| **Morale** | "He's too strong!": the rest start running as you knock them out | Each KO lowers the wave's morale by 0.18; flee desire uses wounds + lost morale |
-| **Double take** | "?" and a turn toward a glimpse | Noticing takes a moment; while it builds, calm enemies stop and face the glimpse |
+| cover | hidden from the threat, next to a solid tile, ≥ 2.5 tiles away | 4-9 tiles away, close to the enemy, one step from a tile that *can* see you (a peek spot) |
+| firing | line of sight to the target | right range band, near cover, not crowded, (sniper) far |
+| flank | line of sight, 3-7.5 tiles | 70-130° round from the ally already attacking you |
+| escape | not closer to the threat than now | far from the threat, hidden |
 
-In the X-Ray, a panel shows the Commission's live habit bars filling toward their thresholds.
+### 4.6 Pathfinding
 
-## 3.6 Reading and being read (v0.4.2)
+Grid A* (8-way, octile heuristic, no corner cutting) with cached routes. Paths are smoothed
+while walking (skip to the next corner whenever there's a clear line for the enemy's body). A
+**tactical cost** can be added per tile: flankers pay +4 for every tile the player can see, so
+their route goes behind cover (tested in `tests/test_grid.py`).
 
-### The tactics blackboard (`tactics.py`)
+### 4.7 Squad coordination
 
-A shared blackboard turns individual enemies into a team. Every frame:
+The **Coordinator** hands out attack tokens (2 on floor 1, 3 later, one fewer in the boss room),
+enforces a 0.35 s gap between attacks starting, and allows **one flanker** at a time. An enemy
+without a token strafes, circles or repositions instead: from the outside it looks like the
+squad is deliberately taking turns and pinning you while one goes round.
 
-- **Goal recognition.** For each carrot or pick-up, how well does Hans's velocity point at it? likelihood = e^(4(cos θ − 1)) / (1 + d/8), where θ is the angle between his heading and the item and d the distance. Each belief is smoothed toward its likelihood (rate 3/s), then normalised; the top item is "his goal" once it passes 45% ("He's after that carrot!").
-- **Escape route.** Of 16 points 4 tiles around Hans, the reachable one furthest from every enemy.
-- **Reading Hans.** Stamina under 20% or one heart left means **pressing**: +0.25 to every attack desire ("He's tiring!").
+### 4.8 The Warden (`warden.py`)
 
-Every 0.5 s (0.25 s while Pfungst is on the field) it hands out **roles** to aware scientists:
-the nearest is the **chaser**. If the goal is confident and far enough away, whoever can reach it
-first becomes the **blocker** and stands on Hans's side of it. The next is a **flanker** (the
-pincer), and the rest are **cutoffs** who run to the escape route. Enemies call their new role
-out loud. Switching `_assign` off makes bots score **22% more** (§5).
+Three phases by health (100-66-33%). A phase change: a shockwave pushes you back, enemy bullets
+vanish, 1.2 s invulnerability, and reinforcements are due. Between attacks it re-decides with
+utility, and every attack has its own cooldown:
 
-### Oskar Pfungst, the boss (`pfungst.py`, `playermodel.py`)
-
-```mermaid
-stateDiagram-v2
-    [*] --> STALK
-    STALK --> READ: within 1.9 tiles and sees Hans
-    READ --> OFF_BALANCE: wrong read ("...Remarkable.")
-    READ --> Decide: right read ("As predicted!")
-    OFF_BALANCE --> Decide: 1.4 s
-    STALK --> Decide: every 0.5 s (heal / flee like everyone else)
-```
-
-- **STALK:** A* toward Hans, but he stops just outside the range Hans usually kicks from (the model tracks the average distance of Hans's kicks).
-- **The player model.** Whenever *any* enemy winds up an attack, the model notes where Hans was. At the release it classifies his escape relative to the attacker: **left / right** (sidestep), **back** (away), **in** (toward, to kick), or nothing if he moved under 0.35 tiles. Counts start at 1 (a Laplace prior) so nothing is certain at first.
-- **READ:** predicts the most frequent side and chalks an **X** 1.6 tiles that way. A red ring marks where Hans stands. After 0.85 s (shortened by wave speed) the net comes down: **caught** if Hans stood still or dodged the side Pfungst is netting (up to 6 tiles away: he throws it); otherwise **OFF-BALANCE** for 1.4 s, open to kicks.
-- **Second-order bluff.** The model also records the player's *reply to the X*: did he dodge to the opposite side? If P(away) > 0.5, Pfungst bluffs with probability P(away): the X goes on his guess, but the net goes to the opposite side. It's a mixed strategy, so the bluff itself can't be read reliably. The X-Ray shows "BLUFF: X right, nets left".
-- 5 hit points, aggression 1.4, cowardice 0.15. Knocking him out is worth 200. Between waves the banner shows **Pfungst's notebook**: "when attacked, you dodge LEFT 45% of the time."
-
-### Wilhelm von Osten, the companion (`vonosten.py`)
-
-An FSM whose transitions come from a **utility** score recomputed four times a second:
-
-| option | utility |
-|---|---|
-| follow | 0.3 (keeps 1.8 tiles behind Hans via A*) |
-| protect | 1.5 if a net or pounce is winding up at Hans within his reach and he isn't winded |
-| point | item worth × 0.9: sugar 1.0 if Hans is hurt (0.2 if not), golden horseshoe 0.8. Skipped if Hans is already going for it (read from the blackboard's goal) |
-
-- **PROTECT:** sprints in and grabs the net (the scientist is stunned 1.2 s, von Osten winded 8 s). A growling dog gets "Down, boy!" from up to 3 tiles away.
-- **POINT:** walks toward the item and **nods** at it. This is the historical cue that made Hans look clever, now an honest hint (a dotted line in the game).
-- **DISTRACT (E):** marches to the nearest scientist; the scientist goes into DISTRACTED for 3.5 s.
-- **STAY (Q):** holds position, e.g. by a gate, to intercept nets there.
-- **Watching your back:** "Behind you, Hans!" when an attack winds up behind Hans (at most every 4 s).
-
-## 4. Waves and procedural generation
-
-- **Courtyards** (`game/arena.py`): each wave places 6–12 hay bales, carts and troughs at random. It keeps a clear ring inside the walls and clear space around the start and the four stable doors. Obstacles never touch each other (no dead ends), and a flood fill proves every tile is reachable; otherwise the layout is re-rolled.
-- **Waves** (`game/waves.py`): waves 1–5 are hand-made to introduce one enemy at a time (wave 1 sends its two scientists 8 s apart). From wave 6, waves are generated from a budget (4 + 0.9 × wave; scientist 1, stable boy 1.5, dog 0.8). Enemy speed grows from 0.82× to 1.35×, and **attack wind-ups shorten with it**, so later waves give you less time to react.
-- **Every 5th wave** Pfungst joins, 3 s in ("Oskar Pfungst arrives!").
-- A one-line intro banner names each new enemy; from wave 2 it names what the Commission learned, and after a wave clears it reads from Pfungst's notebook.
-
-## 5. Balancing by bots (`tools/autoplay.py`)
-
-Two bots play 30 games each (v0.4.2):
-
-| bot | waves reached (median) | best | died in wave 1 |
-|---|---|---|---|
-| naive: runs at carrots, kicks when anything is close | 2 | 4 | 13/30 |
-| player: dodges wind-ups, sidesteps lassos and pounces, kicks during wind-ups, gallops when crowded, grabs pick-ups, dodges away from Pfungst's X | 4 | 7 | 3/30 |
-
-**Ablation** (player bot, 40 games each). Switch one AI system off and see what changes:
-
-| | mean wave | mean score |
+| attack | utility | cooldown |
 |---|---|---|
-| everything on | 3.85 | 1227 |
-| no tactics roles (no blocker / flanker / cutoff) | 4.30 | 1571 (+28%) |
+| summon | 0.85 × (1 − minions / cap) if below the cap (2, or 3 in phase 3) | 9 s |
+| volley (a 7-round fan; two in phase 2+) | 0.6 + 0.1 × range | 2.2 s |
+| ring (18 rounds; two rings in phase 3) | 0.75 if you're within 5, else 0.35 | 4 s |
+| sweep (a 120° laser; walls stop it) | 0.7 | 6 s |
+| charge (phase 2+; dazed and exposed if it hits a wall) | 0.72 | 5 s |
+| drift toward the centre | 0.3 | - |
 
-**Pfungst duels** (`tools/pfungst_lab.py`, 8 × 90 s each). Share of Pfungst's reads that catch Hans:
+## 5. Procedural generation (`rooms.py`)
 
-| player | full Pfungst | guessing (no player model) | no bluffing |
-|---|---|---|---|
-| always dodges left | **95%** | 34% | 95% |
-| reads the X and dodges away | **70%** | 39% | 0% |
-| dodges at random | 36% | 25% | 34% |
+- **Layouts:** five styles (pillars, bunkers, crates, center, lanes). Cover is placed in the top half and **mirrored** top-to-bottom (40% of rooms also left-to-right), so rooms look designed. Accepted only if the entry landing zone and the exit approach are clear, blocks never touch (every gap is walkable), a flood fill reaches every floor tile, and ≥ 78% stays open. Tested on 150 random rooms.
+- **Contents:** floor 1 introduces one enemy type per room (2 sentries → + hound → + lens → a lockdown with a mender). After that a budget of 3 + 1.2 × (floor − 1) + 0.6 × room buys enemies (sentry 1, hound 1, lens 1.5, mender 1.5; at most one mender).
+- **Tuning per floor:** enemy health +30% per floor, telegraphs 10% shorter (min 75%), bullets 8% faster.
 
-The player model beats a habit (95% vs 34%), and bluffing beats a reader (70% vs 0%). A random
-dodger beats both, just as a truly unpredictable Hans would have beaten Pfungst.
+## 6. Evaluation
 
-The bots drove real changes:
-- **The net outreaches the kick.** At first the kick won every fight, and the naive bot survived 4 minutes untouched.
-- **Dogs got smell and scent tracking.** At first they wandered and rarely found Hans.
-- **Lassos got aim error.** They were hitting 52 of 56.
-- **Double takes.** Enemies turned away mid-glimpse.
-- **Wounded enemies want coffee more.** Coffee never won against attacking.
-- **Carrots are topped up every frame.** A failed spawn could soft-lock a wave.
-- **Gentler wave 1.**
-- **Von Osten shouts at dogs.** Dogs caused most of the damage he couldn't prevent.
-- **Pfungst throws the net at his prediction.** At first a gallop escaped every read, so the prediction didn't matter.
-- **Bluffing is learned, not scripted.** A fixed "bluff after being fooled twice" caught readers 24% of the time; learning P(dodges away from the X) caught them 70%.
+### 6.1 Tests (33, `python -m pytest`)
 
-## 6. Module topic coverage
+Grid (line of sight, ray casts, sliding, A*, tactical cost), rooms (fairness of 150 layouts,
+mirroring, floor plans), senses (cones, suspicion, cover, hearing, shouting, memory → search),
+each enemy (sentry telegraph + locked burst, token limit, cover spot really hidden, flanking
+angle, hound slam + exposure, hound hit, lens laser + evade, mender heal + flee), the Warden
+(phases, shield, minion cap, sweep blocked by cover), and the game (dash, invulnerability,
+ambush, room → room, floor → upgrade, a full title → play → AI View → pause run).
+
+### 6.2 Bots and balancing (`tools/autoplay.py`)
+
+Two bot profiles play full runs: **skilled** (notices a telegraph 30-45% of the way in, dashes
+through last-moment bullets) and **average** (notices late, dodges bullets only at 1.5 tiles,
+aims ±1 tile, never dashes through bullets).
+
+| version | skilled bot | average bot |
+|---|---|---|
+| first playable | escaped 10/10 in 147 s, rooms cleared in 6-12 s, ~1 enemy burst per room | - |
+| + tougher enemies, slower gun, faster enemy attacks, less hiding | escaped 14/20, boss fight ~60 s | escaped 0/20, 6/20 died in the floor 2 lockdown |
+| + supply drop between lockdown waves, smaller 2nd wave | 16/20 | 0/20, median 11 rooms (reaches the Warden) |
+| + Warden 95 health, 2 minions until phase 3 | **16/20** | **2/20**, median 11 rooms |
+
+Bot-driven fixes along the way: enemies decided before they had turned toward you (added the
+0.2 s reaction beat); a hound whose charge ended exactly at a wall wasn't dazed (arriving at a
+wall-bound line's end now counts as a slam); pierce bullets could skip enemies after a kill.
+
+### 6.3 Ablation (`tools/ablation.py`, average bot, floors 1-2, 16 runs each)
+
+| condition | hits on the player per room | seconds per room |
+|---|---|---|
+| full AI | 0.70 | 33.8 |
+| random choice among feasible options (no utility) | 0.57 | 34.1 |
+| no cover | 0.90 | 29.8 |
+| no flank | 0.69 | 31.4 |
+| no attack tokens | 0.89 | 33.6 |
+
+- Utility scoring makes enemies **23% more dangerous** than picking options at random.
+- Cover **trades damage for survival**: sentries that never hide land more hits but die sooner (rooms 12% shorter).
+- Attack tokens **cut unfair damage by ~21%** without making rooms shorter: turns, not weakness.
+- Flanking made no measurable difference against this bot, which rarely hides behind cover (flanking targets a hiding player). An honest limit worth discussing in the report.
+
+## 7. Module topic coverage
 
 | Topic | Where |
 |---|---|
-| Finite state machines | 3 enemy types on one shared FSM core (10–11 states each, incl. GUARD, TRACK); game screens use the same class |
-| Desirability / motivations | attack / flee / heal / cover scores, re-evaluated twice a second |
-| Pathfinding | A* for chase, investigate, search, flee, heal, cover; re-planned while chasing |
-| Perception | sight cone + line of sight, noticing, double take, hearing, smell, memory, shouting |
-| Imperfect information | enemies only know what they sense or are told; coffee only if seen; search the last known spot; dogs follow a trail; Hans's goal is *inferred* from his heading, never known |
-| Adaptation | the Commission learns the player's habits and counters them wave by wave; Pfungst's player model predicts dodges and learns whether to bluff |
-| Coordination | tactics blackboard: goal recognition, escape-route analysis, chaser / blocker / flanker / cutoff roles |
-| Companion AI | von Osten: utility-scored FSM with player commands |
-| Procedural generation | a fair courtyard every wave; generated waves after 5 |
-
-## 7. AI X-Ray (X)
-
-For each enemy: its **state** and **role**, its top **desire scores**, its **sight cone** (orange =
-unaware, red = aware), its **A* path**, its **last-seen marker**, a dog's **ring slot**, and a stable
-boy's chosen **throwing spot**. Also shown:
-- the blackboard's **goal belief** ("his goal? 60%") and **escape route**;
-- **von Osten's** state and utilities;
-- Pfungst's guess or **bluff** ("BLUFF: X right, nets left");
-- a panel with the Commission's habit bars, Pfungst's **dodge model**, and how often you dodge away from his X.
+| Finite state machines | every enemy (shared calm states + per-type combat states), the boss, the game screens |
+| Decision making / desirability | utility scores with hysteresis and feasibility for 5 enemy types; the Warden's attack choice with cooldowns |
+| Pathfinding | A*, octile heuristic, path smoothing, cached routes, tactical danger cost |
+| Perception | cones + exact line of sight, suspicion (double take), hearing, proximity, shouting |
+| Imperfect information | last known position, memory age, investigate, search; hit enemies learn the shot's origin |
+| Tactical AI | cover / firing / flank / escape tile scoring, claims, attack tokens, flanker slot |
+| Procedural generation | mirrored room layouts validated by flood fill, budget-bought enemy groups, upgrades |
+| Game feel (supporting) | telegraph language, hit-stop, screen shake, particles, synthesised sound |
 
 ## 8. Code map
 
 ```
-main.py                     entry point (--wave, --xray, --seed, --no-sound)
-game/config.py              every tunable number
-game/arena.py               procedural courtyards
-game/waves.py               hand-made and generated waves
-game/level.py               the grid: walls, sight, rays, collision, cached A*
-game/match.py               one game: waves, spawning, kicks, hits, items, lassos, score
-game/entities/hans.py       the player's horse
-game/entities/walker.py     A*-following / steering body shared by all enemies
-game/ai/state_machine.py    reusable FSM
-game/ai/enemy.py            shared senses, memory and states
-game/ai/desire.py           desirability scores
-game/ai/scientist.py        CHASE, SWING
-game/ai/stableboy.py        POSITION, THROW, COVER
-game/ai/dog.py              SURROUND, POUNCE, RETREAT (+ smell)
-game/ai/perception.py       sight cones, hearing
-game/ai/pathfinding.py      A*
-game/scenes.py, app.py      title / play / game over, and the main loop
-game/audio.py               synthesised sound (no files)
-game/save.py                best score
-game/ui/                    theme, sprites, view (arena, warnings, HUD, X-Ray), cards
-tools/autoplay.py           balancing bots
-game/ai/commission.py       learns the player's habits, picks counter-tactics
-game/ai/barks.py            speech bubbles for decisions
-game/ai/tactics.py          blackboard: goal recognition, escape route, roles
-game/ai/playermodel.py      how the player dodges (and replies to the chalk X)
-game/ai/pfungst.py          the boss: STALK, READ, OFF-BALANCE, bluffing
-game/ai/vonosten.py         the companion: FOLLOW, STAY, PROTECT, POINT, DISTRACT
-tools/pfungst_lab.py        duels that measure the player model and the bluff
-tests/                      54 tests
+main.py                    entry point (--floor, --xray, --seed, --no-sound)
+game/config.py             every tunable number
+game/geometry.py           points, angles, response curves
+game/grid.py               tiles, exact line of sight, ray casts, collision, routes
+game/pathfinding.py        A* with optional tactical cost
+game/rooms.py              procedural layouts and room contents
+game/room.py               one room's simulation (headless): bullets, hits, waves, rules
+game/run.py                floors, rooms, upgrades, score
+game/player.py             movement, shooting, dash
+game/upgrades.py           the 10 upgrades
+game/ai/                   fsm, senses, agent (shared brain), tactics, grunt, charger, sniper, medic, warden
+game/bot.py                the playtesting bot (also plays the title-screen demo)
+game/ui/                   style, fx (particles/shake), render, hud, xray (AI View), screens
+game/scenes.py, app.py     title / play / upgrade / game over / escaped, and the main loop
+game/audio.py              synthesised sound effects and a bass pulse (no audio files)
+tools/autoplay.py          skilled and average bots, 20 runs each
+tools/ablation.py          switch AI features off one at a time
+tests/                     33 tests
 ```
 
 ## 9. Video plan (2–3 minutes)
 
-1. **0:00** Story cards: Hans reads people; red = his reading of their tells; Pfungst is coming.
-2. **0:15** Wave 1: a scientist spots you (? then !), dodge his wind-up, step in and kick. Von Osten grabs a net: "Unhand my horse!"
-3. **0:35** X-Ray on: states, desires, roles. Head for a carrot: "He's after that carrot!" and the blocker gets there first.
-4. **0:55** Kick a lot, then the wave 2 banner: the Commission learned it; they hop back "Ha! Missed me!". Press E: von Osten argues with a scientist.
-5. **1:15** Wave 3–4: lasso leads its throw; a dog tracks your hoofprints; von Osten "Down, boy!"; he nods toward a sugar cube.
-6. **1:40** Wave 5, Pfungst: dodge left three times, then his chalk X appears on the left, "Predictable, Hans." Caught. Dodge right instead: OFF-BALANCE, kick him.
-7. **2:10** Keep dodging away from the X: X-Ray shows "BLUFF: X right, nets left", "He knows that I know!"
-8. **2:30** The duel table (95% / 70% / 36%) and the ablation: the AI measurably works.
+1. **0:00** Title (a live AI demo plays behind it) → floor 1, room 1. Sneak: a calm sentry's cone turns yellow (`?`), you break line of sight, then ambush it for double damage.
+2. **0:20** Tab → AI View. Walk through one sentry: cone, "sees you" line, utility bars; shoot it and watch **cover** win; hover it to show its **cover map**; it hides, then peeks.
+3. **0:50** Hide behind a block: the red X shows where they *think* you are; one sentry takes the **flank** slot, its heat map and route go round your cover.
+4. **1:15** Room 2: a hound winds up (band follows, flashes white, locks). Dodge so it slams the wall, DAZED, double damage.
+5. **1:30** Room 3: the lens laser stops at a wall; rush it and it EVADEs. Attack tokens in the AI View panel: only two attack at once.
+6. **1:50** Lockdown: warp markers, the mender heals under fire, kill it first.
+7. **2:10** `--floor 3`, the Warden: sweep laser blocked by cover, phase change, summons.
+8. **2:35** Bots and ablation tables: the AI measurably matters.
 
 ## 10. Report plan (2,000 words)
 
 | Section | Words |
 |---|---|
-| Concept: the Clever Hans story as the mechanic (reading and being read) | 150 |
-| The shared FSM core and the state-class pattern | 250 |
-| Perception: sight, noticing, double take, hearing, smell, tracks, memory, shouting | 200 |
-| Desirability and decision making (enemies) and utility (von Osten) | 250 |
-| Coordination: the tactics blackboard, goal recognition, roles | 200 |
-| Pfungst: player modelling and second-order bluffing | 250 |
-| The illusion of intelligence: barks, the learning Commission, visible tells | 200 |
-| Pathfinding, steering, procedural courtyards and waves | 150 |
-| Evaluation: bots, ablation and the Pfungst duels | 250 |
-| Reflection | 100 |
+| Concept and the readability rule (why the earlier versions felt random) | 150 |
+| FSM architecture: state classes, shared calm states, per-type combat states | 250 |
+| Perception and imperfect information: cones, exact LOS, suspicion, hearing, memory, search | 300 |
+| Utility decision making: scores, hysteresis, feasibility; the four enemies | 350 |
+| Tactical positioning and squad coordination: tile scoring, claims, tokens, flanker | 250 |
+| Pathfinding: A*, smoothing, tactical danger cost | 150 |
+| The Warden: phases, utility with cooldowns | 150 |
+| Procedural rooms and contents | 100 |
+| Evaluation: tests, bots, balancing history, ablation | 250 |
+| Reflection and limits (flanking vs this bot; what I'd do next) | 50 |
 
 ## 11. Roadmap to 27 November
 
 | When | What |
 |---|---|
-| ✅ now | Playable wave game, 3 enemy AIs, X-Ray, bots |
-| ✅ now | Illusion of intelligence: barks, learning Commission, pincers, tracking, morale |
-| ✅ now | Story + deep AI: Pfungst (player model, bluffing), von Osten (companion), tactics blackboard, 54 tests |
-| weeks 1–2 | Play it yourself; tune what feels unfair or dull (especially Pfungst's wind-up) |
-| optional | A 4th enemy (a goat that steals carrots) |
+| ✅ now | Complete game: 12 rooms, 4 enemy AIs + boss, AI View, upgrades, bots, ablation, 33 tests |
+| weeks 1–2 | Play it yourself; tune anything that feels unfair or dull |
+| weeks 3–4 | Optional: a 5th enemy (a shield bearer that protects others), a smarter search (visit hiding spots) |
 | weeks 5–7 | Record the video (§9), write the report (§10) |
 | before 27 Nov 3pm | Submit early |

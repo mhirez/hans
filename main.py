@@ -1,8 +1,9 @@
-"""Hans: catch me if you can.
+"""LOCKDOWN: break out of the facility, room by room.
 
     python main.py                 play
-    python main.py --wave 4        start on a later wave
-    python main.py --xray          start with the AI X-Ray on (for demo recordings)
+    python main.py --floor 3       start on a later floor (3 = the Warden's floor)
+    python main.py --xray          start with the AI view on (for demo recordings)
+    python main.py --seed 42       the same rooms every time
     python main.py --no-sound      silence
 """
 
@@ -30,13 +31,14 @@ from game.app import Game  # noqa: E402
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Hans: catch me if you can")
-    parser.add_argument("--wave", type=int, default=1, help="wave to start on")
-    parser.add_argument("--xray", action="store_true", help="start with the AI X-Ray overlay on")
+    parser = argparse.ArgumentParser(description="LOCKDOWN: break out of the facility, room by room")
+    parser.add_argument("--floor", type=int, default=1, help="floor to start on (1-3)")
+    parser.add_argument("--xray", action="store_true", help="start with the AI view on")
     parser.add_argument("--seed", type=int, default=None, help="random seed for a reproducible run")
-    parser.add_argument("--no-sound", action="store_true", help="turn sound effects off")
+    parser.add_argument("--no-sound", action="store_true", help="turn sound off")
     args = parser.parse_args()
-    Game(seed=args.seed, xray=args.xray, start_wave=max(1, args.wave), sound=not args.no_sound).run()
+    Game(seed=args.seed, start_floor=min(3, max(1, args.floor)), xray=args.xray,
+         sound=not args.no_sound).run_loop()
 
 
 if __name__ == "__main__":
